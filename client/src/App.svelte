@@ -116,6 +116,12 @@
 
   function parseRoute() {
     let path = window.location.pathname;
+
+    // Strip out base repo directory if present in pathname
+    if (path.includes('/event/')) {
+      path = path.substring(path.indexOf('/event/'));
+    }
+
     if (window.location.hash && window.location.hash.startsWith('#')) {
       const hashPart = window.location.hash.substring(1);
       if (hashPart.startsWith('/')) {
@@ -148,11 +154,8 @@
   }
 
   function navigate(url) {
-    if (window.location.hash || window.location.protocol === 'file:') {
-      window.location.hash = url.startsWith('/') ? url : `/${url}`;
-    } else {
-      window.history.pushState({}, "", url);
-    }
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    window.location.hash = `#${cleanUrl}`;
     parseRoute();
     initView();
   }

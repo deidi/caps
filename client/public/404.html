@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Caps — Memories Shared</title>
+    <script>
+      // GitHub Pages SPA Single Page Application redirect script
+      // When a user visits https://<user>.github.io/<repo>/event/<slug>, GitHub Pages serves 404.html
+      // This script redirects it to https://<user>.github.io/<repo>/#/event/<slug>
+      var l = window.location;
+      var pathSegments = l.pathname.split('/').filter(Boolean);
+      var repo = pathSegments.length > 0 ? pathSegments[0] : '';
+      var subPath = '/' + pathSegments.slice(1).join('/');
+
+      var newUrl = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        '/' + repo + '/#' + (subPath === '/' ? '' : subPath) +
+        l.search + l.hash;
+
+      window.location.replace(newUrl);
+    </script>
+  </head>
+  <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0F172A; color: #FFFFFF;">
+    <div style="text-align: center;">
+      <h2>Loading Caps Event...</h2>
+      <p style="color: #94A3B8;">Redirecting to your event space</p>
+    </div>
+  </body>
+</html>

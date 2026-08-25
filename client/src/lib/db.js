@@ -246,7 +246,12 @@ export async function deleteEvent(slug) {
  */
 export async function getEventQR(slug) {
   const origin = window.location.origin;
-  const join_url = `${origin}/#/event/${slug}`;
+  const path = window.location.pathname;
+  const basePath = path.endsWith('.html')
+    ? path.substring(0, path.lastIndexOf('/'))
+    : path.replace(/\/$/, '');
+
+  const join_url = `${origin}${basePath}/#/event/${slug}`;
   const qr_data_url = await QRCode.toDataURL(join_url, {
     width: 400,
     margin: 2,
