@@ -841,13 +841,16 @@
     try {
       const res = await api.joinEvent(currentEventSlug, guestNameInput);
       setGuestToken(currentEventSlug, res.guest.token);
+      const eventObj = res.event || guestEventData || { guest_upload_limit: 20 };
+      const limit = Number(eventObj.guest_upload_limit) || 20;
+      const used = Number(res.guest?.upload_count) || 0;
       guestSession = {
         guest: res.guest,
-        event: res.event,
+        event: eventObj,
         quota: {
-          used: res.guest.upload_count,
-          limit: res.event.guest_upload_limit,
-          remaining: res.event.guest_upload_limit - res.guest.upload_count,
+          used,
+          limit,
+          remaining: Math.max(0, limit - used),
         },
       };
       guestNameInput = "";

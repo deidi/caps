@@ -291,8 +291,25 @@ export async function getEventQR(slug) {
  * Guest join event
  */
 export async function joinEvent(slug, name) {
-  const event = await db.events.where('slug').equals(slug).first();
-  if (!event) throw new Error('Event not found');
+  let event = await db.events.where('slug').equals(slug).first();
+  if (!event) {
+    const formattedName = slug
+      .split('-')
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ');
+
+    event = {
+      slug,
+      name: formattedName,
+      date: new Date().toISOString().split('T')[0],
+      tagline: 'Memories Shared in Real-Time',
+      moderation_enabled: true,
+      guest_upload_limit: 20,
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    await db.events.put(event);
+  }
 
   const guestName = (name || '').trim() || 'Guest';
   const token = 'guest_' + Math.random().toString(36).substring(2) + Date.now();
@@ -313,7 +330,8 @@ export async function joinEvent(slug, name) {
     guest: {
       id,
       ...guestRecord
-    }
+    },
+    event
   };
 }
 
