@@ -335,26 +335,57 @@ export async function joinEvent(slug, name) {
   }
 
   const guestName = (name || '').trim() || 'Guest';
-  const token = 'guest_' + Math.random().toString(36).substring(2) + Date.now();
+  
+  // Check if this guest already exists for this event on this device
+  const existingGuests = await db.guests.where('event_slug').equals(slug).toArray();
+  const existingGuest = existingGuests.find(g => g.name.toLowerCase() === guestName.toLowerCase());
 
-  const guestRecord = {
-    event_slug: slug,
-    name: guestName,
-    token,
-    upload_count: 0,
-    created_at: new Date().toISOString()
-  };
+  let guestRecord;
+  let token;
 
-  const id = await db.guests.add(guestRecord);
+  // Calculate real photo count from IndexedDB
+  const allEventPhotos = await db.photos.where('event_slug').equals(slug).toArray();
+
+  if (existingGuest) {
+    const realUploadCount = allEventPhotos.filter(
+      p => p.guest_id === existingGuest.id || p.guest_name.toLowerCase() === guestName.toLowerCase()
+    ).length;
+
+    await db.guests.update(existingGuest.id, { upload_count: realUploadCount });
+    existingGuest.upload_count = realUploadCount;
+    token = existingGuest.token;
+    guestRecord = existingGuest;
+  } else {
+    token = 'guest_' + Math.random().toString(36).substring(2) + Date.now();
+    const realUploadCount = allEventPhotos.filter(
+      p => (p.guest_name || '').toLowerCase() === guestName.toLowerCase()
+    ).length;
+
+    guestRecord = {
+      event_slug: slug,
+      name: guestName,
+      token,
+      upload_count: realUploadCount,
+      created_at: new Date().toISOString()
+    };
+    const id = await db.guests.add(guestRecord);
+    guestRecord.id = id;
+  }
+
   localStorage.setItem(`caps_guest_${slug}`, token);
+
+  const limit = Number(event.guest_upload_limit) || 20;
+  const used = Number(guestRecord.upload_count) || 0;
 
   return {
     success: true,
-    guest: {
-      id,
-      ...guestRecord
-    },
-    event
+    guest: guestRecord,
+    event,
+    quota: {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used)
+    }
   };
 }
 
@@ -389,6 +420,17 @@ export async function getGuestSession(slug, guestToken) {
   const guest = await db.guests.where('token').equals(guestToken).first();
   if (!guest) {
     return { success: false, error: 'Guest session expired or not found' };
+  }
+
+  // Ensure photo count reflects actual photos in IndexedDB
+  const allEventPhotos = await db.photos.where('event_slug').equals(slug).toArray();
+  const realUploadCount = allEventPhotos.filter(
+    p => p.guest_id === guest.id || (p.guest_name && p.guest_name.toLowerCase() === guest.name.toLowerCase())
+  ).length;
+
+  if (guest.upload_count !== realUploadCount) {
+    await db.guests.update(guest.id, { upload_count: realUploadCount });
+    guest.upload_count = realUploadCount;
   }
 
   const limit = Number(event.guest_upload_limit) || 20;
@@ -516,7 +558,7 @@ export async function getPhotos(slug, options = {}) {
   if (options.guest === 'me' && options.guestToken) {
     const guest = await db.guests.where('token').equals(options.guestToken).first();
     if (guest) {
-      photos = photos.filter(p => p.guest_id === guest.id);
+      photos = photos.filter(p => p.guest_id === guest.id || (p.guest_name && p.guest_name.toLowerCase() === guest.name.toLowerCase()));
     }
   }
 
