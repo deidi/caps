@@ -16,6 +16,7 @@
     getOfflineQueue,
     flushOfflineQueue,
   } from "./lib/offline-queue.js";
+  import { db } from "./lib/db.js";
 
   // Global app state
   let loading = $state(false);
@@ -230,17 +231,19 @@
     if (isSlideshowRoute) {
       if (msg.type === "photo:approved") {
         const photo = msg.payload;
-        if (!slideshowPhotos.some((p) => p.id === photo.id)) {
+        if (!slideshowPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
           slideshowPhotos = [...slideshowPhotos, photo];
         }
       } else if (msg.type === "photo:bulk-approved") {
         const newlyApproved = msg.payload.photos || [];
+        const existingHashes = new Set(slideshowPhotos.map((p) => p.hash).filter(Boolean));
         const existingIds = new Set(slideshowPhotos.map((p) => p.id));
-        const toAdd = newlyApproved.filter((p) => !existingIds.has(p.id));
+        const toAdd = newlyApproved.filter((p) => !existingHashes.has(p.hash) && !existingIds.has(p.id));
         slideshowPhotos = [...slideshowPhotos, ...toAdd];
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
-        slideshowPhotos = slideshowPhotos.filter((p) => p.id !== removeId);
+        const removeHash = msg.payload.hash;
+        slideshowPhotos = slideshowPhotos.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
         if (currentSlideIndex >= slideshowPhotos.length) {
           currentSlideIndex = Math.max(0, slideshowPhotos.length - 1);
         }
@@ -248,26 +251,51 @@
     } else if (isGuestRoute) {
       if (msg.type === "photo:approved") {
         const photo = msg.payload;
-        if (!liveGalleryPhotos.some((p) => p.id === photo.id)) {
-          liveGalleryPhotos = [photo, ...liveGalleryPhotos];
-        }
+        // 1. Update status in myUploads
         myUploads = myUploads.map((p) =>
-          p.id === photo.id ? { ...p, status: "approved" } : p,
+          (p.hash === photo.hash || p.id === photo.id) ? { ...p, status: "approved" } : p,
         );
+
+        // 2. Update status in Guest IndexedDB
+        if (currentEventSlug && photo.hash) {
+          db.photos.where({ event_slug: currentEventSlug, hash: photo.hash }).modify({ status: "approved" }).catch(() => {});
+        }
+
+        // 3. Add to live gallery if not already present
+        const localMatch = myUploads.find((p) => p.hash === photo.hash);
+        const galleryPhoto = localMatch ? { ...localMatch, status: "approved" } : photo;
+
+        if (!liveGalleryPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
+          liveGalleryPhotos = [galleryPhoto, ...liveGalleryPhotos];
+        } else {
+          liveGalleryPhotos = liveGalleryPhotos.map((p) =>
+            (p.hash === photo.hash || p.id === photo.id) ? { ...p, status: "approved" } : p,
+          );
+        }
       } else if (msg.type === "photo:bulk-approved") {
         const newApproved = msg.payload.photos || [];
-        const existingIds = new Set(liveGalleryPhotos.map((p) => p.id));
-        const toAdd = newApproved.filter((p) => !existingIds.has(p.id));
-        liveGalleryPhotos = [...toAdd, ...liveGalleryPhotos];
-
+        const approvedHashes = new Set(newApproved.map((p) => p.hash).filter(Boolean));
         const approvedIds = new Set(newApproved.map((p) => p.id));
+
         myUploads = myUploads.map((p) =>
-          approvedIds.has(p.id) ? { ...p, status: "approved" } : p,
+          (approvedHashes.has(p.hash) || approvedIds.has(p.id)) ? { ...p, status: "approved" } : p,
         );
+
+        if (currentEventSlug) {
+          for (const hash of approvedHashes) {
+            db.photos.where({ event_slug: currentEventSlug, hash }).modify({ status: "approved" }).catch(() => {});
+          }
+        }
+
+        const existingHashes = new Set(liveGalleryPhotos.map((p) => p.hash).filter(Boolean));
+        const existingIds = new Set(liveGalleryPhotos.map((p) => p.id));
+        const toAdd = newApproved.filter((p) => !existingHashes.has(p.hash) && !existingIds.has(p.id));
+        liveGalleryPhotos = [...toAdd, ...liveGalleryPhotos];
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
-        liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== removeId);
-        myUploads = myUploads.filter((p) => p.id !== removeId);
+        const removeHash = msg.payload.hash;
+        liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
+        myUploads = myUploads.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
         if (selectedPhotoIds.has(removeId)) {
           selectedPhotoIds.delete(removeId);
           selectedPhotoIds = new Set(selectedPhotoIds);
