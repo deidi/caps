@@ -3,7 +3,7 @@ name: Deploy Caps v2 to GitHub Pages
 on:
   push:
     branches:
-      - v2
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
