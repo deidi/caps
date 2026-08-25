@@ -2813,9 +2813,7 @@
               </button>
             {/if}
             <a
-              href="/api/events/{isGuestRoute
-                ? guestEventData.slug
-                : selectedEvent.slug}/photos/{selectedPreviewPhoto.id}/download"
+              href={selectedPreviewPhoto.original_path || selectedPreviewPhoto.original_url}
               download={selectedPreviewPhoto.filename}
               class="btn-primary btn-sm"
             >
@@ -3010,7 +3008,7 @@
             {#if !isProjectionMode}
               <div class="modal-footer qr-modal-footer">
                 <a
-                  href="/api/events/{selectedEvent.slug}/qr?format=png"
+                  href={qrData.qr_data_url}
                   download="caps-qr-{selectedEvent.slug}.png"
                   class="btn-secondary"
                 >
