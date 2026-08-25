@@ -7,13 +7,38 @@
 ## 🌟 Key Features
 
 - ⚡ **Zero Backend Servers**: No Node.js server, Python backend, or local command line needed to run during live events.
-- 🌐 **Static Deployment**: Designed specifically for **GitHub Pages** (`https://<user>.github.io/caps/`).
+- 🌐 **Static Deployment**: Designed specifically for **GitHub Pages** (`https://deidi.github.io/caps/#/`).
 - 🔒 **Client-Side Database**: Powered by **IndexedDB (Dexie.js)** with SHA-256 host PIN hashing and session tokens.
 - 📱 **Real-Time WebRTC P2P Mesh**: Photos stream directly from guest mobile phones to the host laptop/TV slideshow over WebRTC data channels with public tracker signaling (`trystero`).
 - 🖼️ **In-Browser Image Engine**: Resizing (2048px), thumbnail generation (360px), EXIF orientation/stripping, and SHA-256 duplicate detection executed client-side via HTML5 `OffscreenCanvas` & `exifr`.
 - ☁️ **Direct Google Drive Cloud Backup**: 1-click Google OAuth 2.0 (GIS) with restricted `drive.file` scope. Automatically creates `/Caps Events/<Event Name>` in the host's personal Google Drive with full database snapshots (`event_manifest.json`).
 - 📦 **In-Memory ZIP Exporter**: Export full event archives (`.zip`) with `JSZip` + `FileSaver.js` in under 2 seconds.
 - 📴 **Offline PWA**: Full Service Worker (`sw.js`) and PWA manifest (`manifest.json`) pre-caching the app shell for offline use.
+
+---
+
+## 🌐 Running via GitHub Pages
+
+Caps v2 is designed to run directly on **GitHub Pages** with zero setup.
+
+### 1. Enable GitHub Pages (One-Time Setup)
+1. Open your repository settings: [github.com/deidi/caps/settings/pages](https://github.com/deidi/caps/settings/pages)
+2. Under **Build and deployment > Source**, select **`GitHub Actions`**.
+3. The included workflow (`.github/workflows/deploy.yml`) will automatically build and publish the app on every push to `main`.
+
+### 2. Live Web App URL
+Once the GitHub Action completes, your app is live at:
+👉 **[https://deidi.github.io/caps/#/](https://deidi.github.io/caps/#/)**
+
+---
+
+## 📱 How to Use During an Event
+
+| Role / Device | URL | Instructions |
+| :--- | :--- | :--- |
+| **💻 Host (Laptop/PC)** | `https://deidi.github.io/caps/#/` | 1. Enter Host Name & PIN to set up.<br>2. Click **`+ Create New Event`** (e.g. `sunday-worship`).<br>3. Open the event dashboard and click **`📱 QR Code`** to display on venue screens or print. |
+| **📱 Guests (Smartphones)** | `https://deidi.github.io/caps/#/event/<slug>` | 1. Scan the host's QR code or open the link on any phone.<br>2. Enter their name (e.g. `Sarah`) and tap **Join Event**.<br>3. Snap photos with their phone camera and upload! |
+| **📺 TV / Projector Mode** | `https://deidi.github.io/caps/#/event/<slug>/slideshow` | 1. Open on the projector or TV browser.<br>2. Press **`F`** for fullscreen mode.<br>3. Photos approved in real-time by the host will automatically appear in the live slideshow rotation. |
 
 ---
 
@@ -50,21 +75,6 @@ To test the production build locally:
 npm.cmd run build
 npm.cmd run preview
 ```
-
----
-
-## 🌐 Deploying to GitHub Pages
-
-Caps v2 is built for seamless hosting on **GitHub Pages**:
-
-1. Open your repository on GitHub: **Settings > Pages** (`https://github.com/<user>/<repo>/settings/pages`).
-2. Under **Build and deployment > Source**, select **"GitHub Actions"**.
-3. Push to `main` (or trigger the workflow manually in the Actions tab).
-4. The included `.github/workflows/deploy.yml` will build and publish your app automatically.
-5. Access your live event hub at:
-   ```
-   https://<your-username>.github.io/<repo-name>/#/
-   ```
 
 ---
 
