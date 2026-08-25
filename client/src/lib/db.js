@@ -167,14 +167,14 @@ export async function getEvents() {
   const events = await db.events.orderBy('created_at').reverse().toArray();
 
   const eventsWithStats = await Promise.all(events.map(async (e) => {
-    const total_photos = await db.photos.where('event_slug').equals(e.slug).count();
-    const approved_photos = await db.photos.where({ event_slug: e.slug, status: 'approved' }).count();
-    const pending_photos = await db.photos.where({ event_slug: e.slug, status: 'pending' }).count();
+    const allPhotos = await db.photos.where('event_slug').equals(e.slug).toArray();
+    const approved_photos = allPhotos.filter(p => p.status === 'approved').length;
+    const pending_photos = allPhotos.filter(p => p.status === 'pending').length;
     const total_guests = await db.guests.where('event_slug').equals(e.slug).count();
 
     return {
       ...e,
-      total_photos,
+      total_photos: allPhotos.length,
       approved_photos,
       pending_photos,
       total_guests
@@ -211,16 +211,16 @@ export async function getEvent(slug) {
     event = newGuestEvent;
   }
 
-  const total_photos = await db.photos.where('event_slug').equals(slug).count();
-  const approved_photos = await db.photos.where({ event_slug: slug, status: 'approved' }).count();
-  const pending_photos = await db.photos.where({ event_slug: slug, status: 'pending' }).count();
+  const allPhotos = await db.photos.where('event_slug').equals(slug).toArray();
+  const approved_photos = allPhotos.filter(p => p.status === 'approved').length;
+  const pending_photos = allPhotos.filter(p => p.status === 'pending').length;
   const total_guests = await db.guests.where('event_slug').equals(slug).count();
 
   return {
     success: true,
     event: {
       ...event,
-      total_photos,
+      total_photos: allPhotos.length,
       approved_photos,
       pending_photos,
       total_guests
@@ -386,7 +386,7 @@ export async function getGuestSession(slug, guestToken) {
     return { success: false, error: 'No guest token provided' };
   }
 
-  const guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
+  const guest = await db.guests.where('token').equals(guestToken).first();
   if (!guest) {
     return { success: false, error: 'Guest session expired or not found' };
   }
@@ -419,7 +419,7 @@ export async function uploadPhoto(slug, file, guestToken) {
   let guest = null;
 
   if (guestToken) {
-    guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
+    guest = await db.guests.where('token').equals(guestToken).first();
   }
 
   if (!isHost && !guest) {
@@ -438,22 +438,23 @@ export async function uploadPhoto(slug, file, guestToken) {
     maxDimension: 2048,
     thumbDimension: 360,
     quality: 0.88,
-    thumbQuality: 0.75
+    thumbQuality: 0.75,
+    stripExif: event.exif_strip !== false
   });
 
-  // Duplicate detection
-  const existing = await db.photos.where({ event_slug: slug, hash: processed.hash }).first();
+  // Duplicate check
+  const existing = await db.photos.where('hash').equals(processed.hash).first();
   if (existing) {
-    throw new Error('Duplicate photo: This exact image has already been uploaded to this event');
+    throw new Error('This photo has already been uploaded to this event.');
   }
 
-  const initialStatus = (isHost || !event.moderation_enabled) ? 'approved' : 'pending';
+  const initialStatus = (!event.moderation_enabled || isHost) ? 'approved' : 'pending';
   const now = new Date().toISOString();
 
   const photoRecord = {
     event_slug: slug,
     guest_id: guest ? guest.id : null,
-    guest_name: guest ? guest.name : 'Host',
+    guest_name: isHost ? 'Host' : (guest ? guest.name : 'Guest'),
     filename: processed.filename,
     hash: processed.hash,
     status: initialStatus,
@@ -469,9 +470,10 @@ export async function uploadPhoto(slug, file, guestToken) {
   const id = await db.photos.add(photoRecord);
 
   if (guest) {
-    const updatedCount = (guest.upload_count || 0) + 1;
-    await db.guests.update(guest.id, { upload_count: updatedCount });
-    guest.upload_count = updatedCount;
+    await db.guests.update(guest.id, {
+      upload_count: (guest.upload_count || 0) + 1
+    });
+    guest.upload_count = (guest.upload_count || 0) + 1;
   }
 
   const originalUrl = getCachedObjectURL(processed.originalBlob, `orig_${id}`);
@@ -512,7 +514,7 @@ export async function getPhotos(slug, options = {}) {
   }
 
   if (options.guest === 'me' && options.guestToken) {
-    const guest = await db.guests.where({ event_slug: slug, token: options.guestToken }).first();
+    const guest = await db.guests.where('token').equals(options.guestToken).first();
     if (guest) {
       photos = photos.filter(p => p.guest_id === guest.id);
     }
