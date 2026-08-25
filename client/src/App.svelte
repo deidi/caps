@@ -16,7 +16,7 @@
     getOfflineQueue,
     flushOfflineQueue,
   } from "./lib/offline-queue.js";
-  import { db } from "./lib/db.js";
+  import { db, blobToBase64, base64ToBlob } from "./lib/db.js";
 
   // Global app state
   let loading = $state(false);
@@ -257,19 +257,37 @@
         );
 
         // 2. Update status in Guest IndexedDB
-        if (currentEventSlug && photo.hash) {
-          db.photos.where({ event_slug: currentEventSlug, hash: photo.hash }).modify({ status: "approved" }).catch(() => {});
+        if (photo.hash) {
+          db.photos.where("hash").equals(photo.hash).modify({ status: "approved" }).catch(() => {});
         }
 
-        // 3. Add to live gallery if not already present
+        // 3. Find or construct the photo object with valid local Object URL
         const localMatch = myUploads.find((p) => p.hash === photo.hash);
-        const galleryPhoto = localMatch ? { ...localMatch, status: "approved" } : photo;
+        let galleryItem = localMatch ? { ...localMatch, status: "approved" } : null;
 
+        if (!galleryItem && photo.thumbDataUrl) {
+          const thumbBlob = base64ToBlob(photo.thumbDataUrl);
+          const origBlob = photo.originalDataUrl ? base64ToBlob(photo.originalDataUrl) : thumbBlob;
+          const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
+          const origUrl = origBlob ? URL.createObjectURL(origBlob) : "";
+          galleryItem = {
+            ...photo,
+            status: "approved",
+            thumb_url: thumbUrl,
+            original_url: origUrl,
+            thumbnail_path: thumbUrl,
+            original_path: origUrl,
+          };
+        } else if (!galleryItem) {
+          galleryItem = { ...photo, status: "approved" };
+        }
+
+        // 4. Update liveGalleryPhotos reactively
         if (!liveGalleryPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
-          liveGalleryPhotos = [galleryPhoto, ...liveGalleryPhotos];
+          liveGalleryPhotos = [galleryItem, ...liveGalleryPhotos];
         } else {
           liveGalleryPhotos = liveGalleryPhotos.map((p) =>
-            (p.hash === photo.hash || p.id === photo.id) ? { ...p, status: "approved" } : p,
+            (p.hash === photo.hash || p.id === photo.id) ? { ...p, ...galleryItem, status: "approved" } : p,
           );
         }
       } else if (msg.type === "photo:bulk-approved") {
@@ -281,10 +299,8 @@
           (approvedHashes.has(p.hash) || approvedIds.has(p.id)) ? { ...p, status: "approved" } : p,
         );
 
-        if (currentEventSlug) {
-          for (const hash of approvedHashes) {
-            db.photos.where({ event_slug: currentEventSlug, hash }).modify({ status: "approved" }).catch(() => {});
-          }
+        for (const hash of approvedHashes) {
+          db.photos.where("hash").equals(hash).modify({ status: "approved" }).catch(() => {});
         }
 
         const existingHashes = new Set(liveGalleryPhotos.map((p) => p.hash).filter(Boolean));
@@ -574,9 +590,23 @@
         const approvedItem = { ...photo, status: "approved" };
         approvedPhotos = [approvedItem, ...approvedPhotos];
         if (wsHandle) {
+          const dbRecord = await db.photos.get(photoId);
+          let thumbDataUrl = photo.thumbDataUrl;
+          let originalDataUrl = photo.originalDataUrl;
+          if (!thumbDataUrl && dbRecord?.thumb_blob) {
+            thumbDataUrl = await blobToBase64(dbRecord.thumb_blob);
+          }
+          if (!originalDataUrl && dbRecord?.original_blob) {
+            originalDataUrl = await blobToBase64(dbRecord.original_blob);
+          }
+
           wsHandle.send({
             type: "photo:approved",
-            payload: approvedItem,
+            payload: {
+              ...approvedItem,
+              thumbDataUrl,
+              originalDataUrl,
+            },
           });
         }
       }
@@ -588,12 +618,13 @@
 
   async function handleRejectPhoto(photoId) {
     try {
+      const photo = pendingPhotos.find((p) => p.id === photoId);
       await api.patchPhotoStatus(selectedEvent.slug, photoId, "rejected");
       pendingPhotos = pendingPhotos.filter((p) => p.id !== photoId);
       if (wsHandle) {
         wsHandle.send({
           type: "photo:deleted",
-          payload: { id: photoId },
+          payload: { id: photoId, hash: photo?.hash },
         });
       }
       await loadEvents();
@@ -621,7 +652,7 @@
         if (wsHandle) {
           wsHandle.send({
             type: "photo:removed",
-            payload: { id: photoId },
+            payload: { id: photoId, hash: photo?.hash },
           });
         }
       }
