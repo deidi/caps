@@ -169,33 +169,45 @@
     parseRoute();
 
     if (wsHandle) {
-      wsHandle.disconnect();
+      try {
+        wsHandle.disconnect();
+      } catch (e) {}
       wsHandle = null;
     }
 
-    if (isSlideshowRoute && currentEventSlug) {
-      await loadSlideshowExperience(currentEventSlug);
-      setupWebSocket(currentEventSlug, false);
-    } else if (isGuestRoute && currentEventSlug) {
-      await loadGuestExperience(currentEventSlug);
-      setupWebSocket(currentEventSlug, false);
-    } else {
-      await checkAuth();
+    try {
+      if (isSlideshowRoute && currentEventSlug) {
+        await loadSlideshowExperience(currentEventSlug);
+        setupWebSocket(currentEventSlug, false);
+      } else if (isGuestRoute && currentEventSlug) {
+        await loadGuestExperience(currentEventSlug);
+        setupWebSocket(currentEventSlug, false);
+      } else {
+        await checkAuth();
+      }
+    } catch (err) {
+      console.error("InitView error:", err);
+      errorMsg = err.message || "Failed to load event";
+    } finally {
+      loading = false;
     }
-    loading = false;
   }
 
   function setupWebSocket(slug, isHost = false) {
     if (!slug) return;
-    wsHandle = createWebSocketConnection(slug, {
-      isHost,
-      onStatusChange: (status) => {
-        wsConnectionStatus = status;
-      },
-      onMessage: (msg) => {
-        handleWebSocketMessage(msg);
-      },
-    });
+    try {
+      wsHandle = createWebSocketConnection(slug, {
+        isHost,
+        onStatusChange: (status) => {
+          wsConnectionStatus = status;
+        },
+        onMessage: (msg) => {
+          handleWebSocketMessage(msg);
+        },
+      });
+    } catch (err) {
+      console.warn("P2P Mesh initialization skipped or failed:", err);
+    }
   }
 
   function handleWebSocketMessage(msg) {
@@ -1136,8 +1148,13 @@
 
   onMount(() => {
     initView();
-    window.addEventListener("popstate", parseRoute);
-    window.addEventListener("hashchange", parseRoute);
+
+    const handleRouteChange = () => {
+      initView();
+    };
+
+    window.addEventListener("popstate", handleRouteChange);
+    window.addEventListener("hashchange", handleRouteChange);
     window.addEventListener("keydown", handleKeyDown);
 
     const updateOnlineStatus = () => {
@@ -1158,8 +1175,8 @@
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
 
     return () => {
-      window.removeEventListener("popstate", parseRoute);
-      window.removeEventListener("hashchange", parseRoute);
+      window.removeEventListener("popstate", handleRouteChange);
+      window.removeEventListener("hashchange", handleRouteChange);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("online", updateOnlineStatus);
       window.removeEventListener("offline", updateOnlineStatus);
