@@ -1,21 +1,21 @@
 {
   "name": "Caps — Memories Shared",
   "short_name": "Caps",
-  "description": "Local-network-first church and event photo sharing hub",
-  "start_url": "/",
+  "description": "Server-less church and event photo sharing hub",
+  "start_url": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#F9FAFB",
   "theme_color": "#2563EB",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any"
@@ -25,8 +25,8 @@
   "shortcuts": [
     {
       "name": "Live Gallery",
-      "url": "/",
-      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+      "url": "./",
+      "icons": [{ "src": "./icon.svg", "sizes": "192x192" }]
     }
   ]
 }
