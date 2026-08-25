@@ -43,6 +43,8 @@ export function initP2PMesh(slug, options = {}) {
   const topicPhotos = `${topicBase}/photos`;
   const topicJoins = `${topicBase}/joins`;
   const topicSyncReq = `${topicBase}/sync_req`;
+  const topicGallerySync = `${topicBase}/gallery_sync`;
+  const topicGalleryReq = `${topicBase}/gallery_req`;
   const topicPresence = `${topicBase}/presence/+`;
   const myPresenceTopic = `${topicBase}/presence/${myClientId}`;
 
@@ -88,7 +90,7 @@ export function initP2PMesh(slug, options = {}) {
       onPeerCountChange(1);
 
       // Subscribe to all event channels
-      client.subscribe([topicBroadcast, topicPhotos, topicJoins, topicSyncReq, topicPresence], (err) => {
+      client.subscribe([topicBroadcast, topicPhotos, topicJoins, topicSyncReq, topicGallerySync, topicGalleryReq, topicPresence], (err) => {
         if (err) console.warn('MQTT subscribe warning:', err);
       });
 
@@ -105,7 +107,14 @@ export function initP2PMesh(slug, options = {}) {
           senderId: myClientId,
           timestamp: Date.now()
         }));
+        // Broadcast existing approved photos
+        broadcastApprovedGalleryToPeers();
       } else {
+        // Guest asks Host for latest approved gallery photos
+        client.publish(topicGalleryReq, JSON.stringify({
+          senderId: myClientId,
+          timestamp: Date.now()
+        }));
         // Guest pushes any local photos
         syncLocalPhotosToPeers();
       }
@@ -121,6 +130,15 @@ export function initP2PMesh(slug, options = {}) {
           if (payload.msg) {
             onMessage(payload.msg);
           }
+        } else if (topic === topicGallerySync && !isHost) {
+          if (payload.photos) {
+            onMessage({
+              type: 'gallery:synced',
+              payload: { photos: payload.photos }
+            });
+          }
+        } else if (topic === topicGalleryReq && isHost) {
+          await broadcastApprovedGalleryToPeers();
         } else if (topic === topicPhotos && isHost) {
           if (payload.photo) {
             await handleIncomingPhotoPayload(payload.photo);
@@ -135,7 +153,9 @@ export function initP2PMesh(slug, options = {}) {
           if (payload.senderId && payload.senderId !== myClientId) {
             activePeers.add(payload.senderId);
             onPeerCountChange(activePeers.size + 1);
-            if (!isHost) {
+            if (isHost) {
+              await broadcastApprovedGalleryToPeers();
+            } else {
               syncLocalPhotosToPeers();
             }
           }
@@ -144,6 +164,40 @@ export function initP2PMesh(slug, options = {}) {
         console.warn('Failed to parse incoming realtime packet:', err);
       }
     });
+
+    async function broadcastApprovedGalleryToPeers() {
+      if (!isHost || isDestroyed || !client || !client.connected) return;
+      try {
+        const allPhotos = await db.photos.where('event_slug').equals(slug).toArray();
+        const approved = allPhotos.filter(p => p.status === 'approved');
+        if (!approved.length) return;
+
+        const payloadPhotos = [];
+        for (const p of approved) {
+          let thumbDataUrl = p.thumbDataUrl;
+          if (!thumbDataUrl && p.thumb_blob) {
+            thumbDataUrl = await blobToBase64(p.thumb_blob);
+          }
+          payloadPhotos.push({
+            id: p.id,
+            hash: p.hash,
+            event_slug: p.event_slug,
+            guest_name: p.guest_name,
+            status: 'approved',
+            created_at: p.created_at,
+            filename: p.filename,
+            thumbDataUrl
+          });
+        }
+
+        client.publish(topicGallerySync, JSON.stringify({
+          senderId: myClientId,
+          photos: payloadPhotos
+        }));
+      } catch (err) {
+        console.warn('Failed to broadcast approved gallery:', err);
+      }
+    }
 
     client.on('offline', () => {
       if (!isDestroyed) onStatusChange('reconnecting');
@@ -162,7 +216,7 @@ export function initP2PMesh(slug, options = {}) {
 
   async function handleIncomingGuestJoin(guestData) {
     try {
-      const existing = await db.guests.where({ event_slug: slug, token: guestData.token }).first();
+      const existing = await db.guests.where('token').equals(guestData.token).first();
       if (!existing) {
         await db.guests.add({
           event_slug: slug,
@@ -176,9 +230,9 @@ export function initP2PMesh(slug, options = {}) {
         type: 'guest:joined',
         payload: guestData
       });
-      // Request guest to sync their photos
-      if (client && client.connected) {
-        client.publish(topicSyncReq, JSON.stringify({ senderId: myClientId, timestamp: Date.now() }));
+      // Push latest approved photos to newly joined guest
+      if (isHost) {
+        broadcastApprovedGalleryToPeers();
       }
     } catch (e) {
       console.error('Error handling guest join:', e);

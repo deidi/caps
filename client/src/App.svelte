@@ -248,6 +248,26 @@
           (p) => !existingHashes.has(p.hash) && !existingIds.has(p.id),
         );
         slideshowPhotos = [...slideshowPhotos, ...toAdd];
+      } else if (msg.type === "gallery:synced") {
+        const syncedPhotos = msg.payload.photos || [];
+        for (const photo of syncedPhotos) {
+          if (
+            !slideshowPhotos.some(
+              (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+            )
+          ) {
+            const thumbBlob = base64ToBlob(photo.thumbDataUrl);
+            const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
+            slideshowPhotos = [
+              ...slideshowPhotos,
+              {
+                ...photo,
+                original_path: thumbUrl,
+                original_url: thumbUrl,
+              },
+            ];
+          }
+        }
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
         const removeHash = msg.payload.hash;
@@ -311,6 +331,36 @@
               ? { ...p, ...galleryItem, status: "approved" }
               : p,
           );
+        }
+      } else if (msg.type === "gallery:synced") {
+        const syncedPhotos = msg.payload.photos || [];
+        for (const photo of syncedPhotos) {
+          if (
+            !liveGalleryPhotos.some(
+              (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+            )
+          ) {
+            const localMatch = myUploads.find((p) => p.hash === photo.hash);
+            if (localMatch) {
+              liveGalleryPhotos = [
+                ...liveGalleryPhotos,
+                { ...localMatch, status: "approved" },
+              ];
+            } else if (photo.thumbDataUrl) {
+              const thumbBlob = base64ToBlob(photo.thumbDataUrl);
+              const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
+              liveGalleryPhotos = [
+                ...liveGalleryPhotos,
+                {
+                  ...photo,
+                  thumbnail_path: thumbUrl,
+                  thumb_url: thumbUrl,
+                  original_path: thumbUrl,
+                  original_url: thumbUrl,
+                },
+              ];
+            }
+          }
         }
       } else if (msg.type === "photo:bulk-approved") {
         const newApproved = msg.payload.photos || [];
