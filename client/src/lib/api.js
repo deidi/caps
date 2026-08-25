@@ -44,19 +44,9 @@ export const api = {
   joinEvent: (slug, name) => dbMethods.joinEvent(slug, name),
   getGuestSession: (slug, guestToken) => dbMethods.getGuestSession(slug, guestToken),
 
-  // Photos (Local IndexedDB stubs - enhanced in Slice 2)
-  uploadPhoto: async (slug, file, guestToken) => {
-    // Will be fully handled by photo-engine.js in Slice 2
-    return { success: true, message: 'Photo engine will process in Slice 2' };
-  },
-  getPhotos: async (slug, options = {}) => {
-    const photos = await dbMethods.db.photos.where('event_slug').equals(slug).toArray();
-    let filtered = photos;
-    if (options.status) {
-      filtered = filtered.filter(p => p.status === options.status);
-    }
-    return { success: true, photos: filtered };
-  },
+  // Photos (In-Browser Processing + IndexedDB Storage)
+  uploadPhoto: (slug, file, guestToken) => dbMethods.uploadPhoto(slug, file, guestToken),
+  getPhotos: (slug, options = {}) => dbMethods.getPhotos(slug, options),
   getMyQuota: async (slug, guestToken) => {
     const guest = await dbMethods.db.guests.where({ event_slug: slug, token: guestToken }).first();
     const event = await dbMethods.db.events.where('slug').equals(slug).first();
@@ -71,10 +61,7 @@ export const api = {
       }
     };
   },
-  deletePhoto: async (slug, photoId) => {
-    await dbMethods.db.photos.delete(parseInt(photoId, 10));
-    return { success: true };
-  },
+  deletePhoto: (slug, photoId, guestToken) => dbMethods.deletePhoto(slug, photoId, guestToken),
 
   // Moderation (Host Only - enhanced in Slice 4)
   patchPhotoStatus: async (slug, photoId, status) => {

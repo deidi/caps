@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import QRCode from 'qrcode';
+import { processPhotoClient } from './photo-engine.js';
 
 export const db = new Dexie('caps_v2_db');
 
@@ -10,6 +11,19 @@ db.version(1).stores({
   photos: '++id, event_slug, guest_id, guest_name, hash, status, created_at',
   sync_logs: '++id, event_slug, photo_id, status, error, timestamp'
 });
+
+// Cache for Object URLs to avoid memory leaks and excessive URL creation
+const objectUrlCache = new Map();
+
+export function getCachedObjectURL(blob, key) {
+  if (!blob) return '';
+  if (objectUrlCache.has(key)) {
+    return objectUrlCache.get(key);
+  }
+  const url = URL.createObjectURL(blob);
+  objectUrlCache.set(key, url);
+  return url;
+}
 
 /**
  * Compute SHA-256 hash using native browser SubtleCrypto
@@ -304,16 +318,190 @@ export async function getGuestSession(slug, guestToken) {
 }
 
 /**
+ * Upload & process photo client-side
+ */
+export async function uploadPhoto(slug, file, guestToken) {
+  const event = await db.events.where('slug').equals(slug).first();
+  if (!event) throw new Error('Event not found');
+  if (event.status === 'archived') throw new Error('Event is archived. Uploads are disabled.');
+
+  const hostToken = localStorage.getItem('caps_host_token');
+  const isHost = Boolean(hostToken);
+  let guest = null;
+
+  if (guestToken) {
+    guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
+  }
+
+  if (!isHost && !guest) {
+    throw new Error('Please enter your name to upload photos');
+  }
+
+  // Check guest quota
+  if (!isHost && guest) {
+    if (guest.upload_count >= event.guest_upload_limit) {
+      throw new Error(`Upload limit reached (${event.guest_upload_limit} photos). Delete earlier photos to free up slots.`);
+    }
+  }
+
+  // Process photo client-side (resizing, thumbnails, duplicate hash, EXIF stripping)
+  const processed = await processPhotoClient(file, {
+    maxDimension: 2048,
+    thumbDimension: 360,
+    quality: 0.88,
+    thumbQuality: 0.75
+  });
+
+  // Duplicate detection
+  const existing = await db.photos.where({ event_slug: slug, hash: processed.hash }).first();
+  if (existing) {
+    throw new Error('Duplicate photo: This exact image has already been uploaded to this event');
+  }
+
+  const initialStatus = (isHost || !event.moderation_enabled) ? 'approved' : 'pending';
+  const now = new Date().toISOString();
+
+  const photoRecord = {
+    event_slug: slug,
+    guest_id: guest ? guest.id : null,
+    guest_name: guest ? guest.name : 'Host',
+    filename: processed.filename,
+    hash: processed.hash,
+    status: initialStatus,
+    width: processed.width,
+    height: processed.height,
+    size: processed.size,
+    mime_type: processed.mimeType,
+    original_blob: processed.originalBlob,
+    thumb_blob: processed.thumbBlob,
+    created_at: now
+  };
+
+  const id = await db.photos.add(photoRecord);
+
+  if (guest) {
+    const updatedCount = (guest.upload_count || 0) + 1;
+    await db.guests.update(guest.id, { upload_count: updatedCount });
+    guest.upload_count = updatedCount;
+  }
+
+  const originalUrl = getCachedObjectURL(processed.originalBlob, `orig_${id}`);
+  const thumbUrl = getCachedObjectURL(processed.thumbBlob, `thumb_${id}`);
+
+  const quota = guest ? {
+    used: guest.upload_count,
+    limit: event.guest_upload_limit,
+    remaining: Math.max(0, event.guest_upload_limit - guest.upload_count)
+  } : { used: 0, limit: 999, remaining: 999 };
+
+  return {
+    success: true,
+    photo: {
+      id,
+      ...photoRecord,
+      original_url: originalUrl,
+      thumb_url: thumbUrl,
+      original_path: originalUrl,
+      thumbnail_path: thumbUrl,
+      original_blob: undefined,
+      thumb_blob: undefined
+    },
+    quota
+  };
+}
+
+/**
+ * Get photos for an event
+ */
+export async function getPhotos(slug, options = {}) {
+  let query = db.photos.where('event_slug').equals(slug);
+  let photos = await query.toArray();
+
+  if (options.status) {
+    photos = photos.filter(p => p.status === options.status);
+  }
+
+  if (options.guest === 'me' && options.guestToken) {
+    const guest = await db.guests.where({ event_slug: slug, token: options.guestToken }).first();
+    if (guest) {
+      photos = photos.filter(p => p.guest_id === guest.id);
+    }
+  }
+
+  photos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  const result = photos.map(p => {
+    const origUrl = getCachedObjectURL(p.original_blob, `orig_${p.id}`);
+    const thumbUrl = getCachedObjectURL(p.thumb_blob, `thumb_${p.id}`);
+    return {
+      id: p.id,
+      event_slug: p.event_slug,
+      guest_id: p.guest_id,
+      guest_name: p.guest_name,
+      filename: p.filename,
+      hash: p.hash,
+      status: p.status,
+      width: p.width,
+      height: p.height,
+      size: p.size,
+      created_at: p.created_at,
+      original_url: origUrl,
+      thumb_url: thumbUrl,
+      original_path: origUrl,
+      thumbnail_path: thumbUrl
+    };
+  });
+
+  return { success: true, photos: result };
+}
+
+/**
+ * Delete a photo
+ */
+export async function deletePhoto(slug, photoId, guestToken) {
+  const photo = await db.photos.get(parseInt(photoId, 10));
+  if (!photo) throw new Error('Photo not found');
+
+  const event = await db.events.where('slug').equals(slug).first();
+  const limit = event ? event.guest_upload_limit : 20;
+  let remaining = limit;
+  let used = 0;
+
+  if (photo.guest_id) {
+    const guest = await db.guests.get(photo.guest_id);
+    if (guest) {
+      const newCount = Math.max(0, (guest.upload_count || 1) - 1);
+      await db.guests.update(guest.id, { upload_count: newCount });
+      used = newCount;
+      remaining = Math.max(0, limit - newCount);
+    }
+  }
+
+  await db.photos.delete(photo.id);
+
+  return {
+    success: true,
+    quota: {
+      used,
+      limit,
+      remaining
+    }
+  };
+}
+
+/**
  * Get event analytics summary
  */
 export async function getEventAnalytics(slug) {
   const event = await db.events.where('slug').equals(slug).first();
   if (!event) throw new Error('Event not found');
 
-  const total_photos = await db.photos.where('event_slug').equals(slug).count();
-  const approved_photos = await db.photos.where({ event_slug: slug, status: 'approved' }).count();
-  const pending_photos = await db.photos.where({ event_slug: slug, status: 'pending' }).count();
+  const photos = await db.photos.where('event_slug').equals(slug).toArray();
+  const total_photos = photos.length;
+  const approved_photos = photos.filter(p => p.status === 'approved').length;
+  const pending_photos = photos.filter(p => p.status === 'pending').length;
   const total_guests = await db.guests.where('event_slug').equals(slug).count();
+  const storage_size_bytes = photos.reduce((acc, p) => acc + (p.size || 0), 0);
 
   return {
     success: true,
@@ -322,7 +510,7 @@ export async function getEventAnalytics(slug) {
       approved_photos,
       pending_photos,
       total_guests,
-      storage_size_bytes: 0
+      storage_size_bytes
     }
   };
 }
