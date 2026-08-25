@@ -1,7 +1,5 @@
-import { joinRoom } from '@trystero-p2p/mqtt';
+import mqtt from 'mqtt';
 import { db, getCachedObjectURL } from './db.js';
-
-const APP_ID = 'caps-photo-hub-v2';
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -15,7 +13,7 @@ function blobToBase64(blob) {
 function base64ToBlob(dataUrl) {
   if (!dataUrl || typeof dataUrl !== 'string') return null;
   const parts = dataUrl.split(';base64,');
-  const contentType = (parts[0].split(':')[1]) || 'image/jpeg';
+  const contentType = parts[0].split(':')[1] || 'image/jpeg';
   const raw = window.atob(parts[1] || '');
   const rawLength = raw.length;
   const uInt8Array = new Uint8Array(rawLength);
@@ -26,7 +24,7 @@ function base64ToBlob(dataUrl) {
 }
 
 /**
- * Initialize WebRTC P2P Mesh Room for an event
+ * Initialize High-Speed Realtime WebSocket Hub for an event
  */
 export function initP2PMesh(slug, options = {}) {
   if (!slug) return null;
@@ -37,106 +35,133 @@ export function initP2PMesh(slug, options = {}) {
   const onPeerCountChange = options.onPeerCountChange || (() => {});
 
   let isDestroyed = false;
-  const connectedPeers = new Set();
+  const activePeers = new Set();
+
+  const myClientId = 'peer_' + Math.random().toString(36).substring(2, 10);
+  const topicBase = `caps_v2_${slug}`;
+  const topicBroadcast = `${topicBase}/broadcast`;
+  const topicPhotos = `${topicBase}/photos`;
+  const topicJoins = `${topicBase}/joins`;
+  const topicSyncReq = `${topicBase}/sync_req`;
+  const topicPresence = `${topicBase}/presence/+`;
+  const myPresenceTopic = `${topicBase}/presence/${myClientId}`;
 
   // Local BroadcastChannel for instant same-browser multi-tab sync
   let localChannel = null;
   if (typeof BroadcastChannel !== 'undefined') {
-    localChannel = new BroadcastChannel(`caps_local_${slug}`);
-    localChannel.onmessage = async (event) => {
-      if (event.data && !isDestroyed) {
-        if (event.data.type === 'local:photo-streamed' && isHost) {
-          // Ingest local multi-tab photo
-          const photoData = event.data.payload;
-          if (photoData) {
-            handleIncomingPhotoPayload(photoData);
+    try {
+      localChannel = new BroadcastChannel(`caps_local_${slug}`);
+      localChannel.onmessage = async (event) => {
+        if (event.data && !isDestroyed) {
+          if (event.data.type === 'local:photo-streamed' && isHost) {
+            const photoData = event.data.payload;
+            if (photoData) {
+              await handleIncomingPhotoPayload(photoData);
+            }
+          } else {
+            onMessage(event.data);
           }
-        } else {
-          onMessage(event.data);
         }
-      }
-    };
+      };
+    } catch (e) {
+      console.warn('BroadcastChannel error:', e);
+    }
   }
 
-  // WebRTC Trystero Room using MQTT WebSocket brokers and STUN servers
-  const room = joinRoom({
-    appId: APP_ID,
-    rtcConfig: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ]
-    }
-  }, `caps-room-${slug}`);
-
+  // Connect to global enterprise WebSocket broker (EMQX)
+  const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
   onStatusChange('connecting');
 
-  // 1. JSON Broadcast Action (photo status changes, moderation, event state)
-  const [sendBroadcast, getBroadcast] = room.makeAction('broadcast');
+  let client = null;
+  try {
+    client = mqtt.connect(brokerUrl, {
+      clientId: `caps_${isHost ? 'host' : 'guest'}_${myClientId}`,
+      clean: true,
+      connectTimeout: 8000,
+      reconnectPeriod: 2500,
+      keepalive: 45
+    });
 
-  // 2. Binary Photo Transfer Action (transfers photo data URLs between guest and host)
-  const [sendPhotoBinary, getPhotoBinary, onPhotoProgress] = room.makeAction('photo_binary');
+    client.on('connect', () => {
+      if (isDestroyed) return;
+      onStatusChange('connected');
+      onPeerCountChange(1);
 
-  // 3. Guest Join Action
-  const [sendGuestJoin, getGuestJoin] = room.makeAction('guest_join');
+      // Subscribe to all event channels
+      client.subscribe([topicBroadcast, topicPhotos, topicJoins, topicSyncReq, topicPresence], (err) => {
+        if (err) console.warn('MQTT subscribe warning:', err);
+      });
 
-  // 4. Request Sync Action (Host requests guest to push photos)
-  const [sendSyncRequest, getSyncRequest] = room.makeAction('sync_request');
+      // Broadcast presence announcement
+      client.publish(myPresenceTopic, JSON.stringify({
+        senderId: myClientId,
+        role: isHost ? 'host' : 'guest',
+        timestamp: Date.now()
+      }));
 
-  // Handle incoming broadcast messages from peers
-  getBroadcast((data, peerId) => {
-    if (isDestroyed || !data) return;
-    onMessage(data);
-  });
-
-  // Handle incoming sync requests (Guest side)
-  getSyncRequest(async (data, peerId) => {
-    if (isDestroyed || isHost) return;
-    await syncLocalPhotosToPeers();
-  });
-
-  async function syncLocalPhotosToPeers() {
-    if (isHost || isDestroyed) return;
-    try {
-      const guestToken = localStorage.getItem(`caps_guest_${slug}`);
-      const photos = await db.photos.where('event_slug').equals(slug).toArray();
-      let guestName = 'Guest';
-      if (guestToken) {
-        const guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
-        if (guest) guestName = guest.name;
+      if (isHost) {
+        // Host requests connected guests to push photos
+        client.publish(topicSyncReq, JSON.stringify({
+          senderId: myClientId,
+          timestamp: Date.now()
+        }));
+      } else {
+        // Guest pushes any local photos
+        syncLocalPhotosToPeers();
       }
+    });
 
-      for (const photo of photos) {
-        if (photo.original_blob && photo.thumb_blob) {
-          await streamPhotoToHost({
-            filename: photo.filename,
-            hash: photo.hash,
-            width: photo.width,
-            height: photo.height,
-            size: photo.size,
-            mimeType: photo.mime_type,
-            originalBlob: photo.original_blob,
-            thumbBlob: photo.thumb_blob
-          }, {
-            name: photo.guest_name || guestName,
-            token: guestToken || ''
-          });
+    client.on('message', async (topic, messageBuffer) => {
+      if (isDestroyed) return;
+      try {
+        const payload = JSON.parse(messageBuffer.toString());
+        if (payload.senderId === myClientId) return; // Ignore own echoes
+
+        if (topic === topicBroadcast) {
+          if (payload.msg) {
+            onMessage(payload.msg);
+          }
+        } else if (topic === topicPhotos && isHost) {
+          if (payload.photo) {
+            await handleIncomingPhotoPayload(payload.photo);
+          }
+        } else if (topic === topicJoins && isHost) {
+          if (payload.guest) {
+            await handleIncomingGuestJoin(payload.guest);
+          }
+        } else if (topic === topicSyncReq && !isHost) {
+          await syncLocalPhotosToPeers();
+        } else if (topic.startsWith(`${topicBase}/presence/`)) {
+          if (payload.senderId && payload.senderId !== myClientId) {
+            activePeers.add(payload.senderId);
+            onPeerCountChange(activePeers.size + 1);
+            if (!isHost) {
+              syncLocalPhotosToPeers();
+            }
+          }
         }
+      } catch (err) {
+        console.warn('Failed to parse incoming realtime packet:', err);
       }
-    } catch (err) {
-      console.warn('Auto-sync photos on peer join error:', err);
-    }
+    });
+
+    client.on('offline', () => {
+      if (!isDestroyed) onStatusChange('reconnecting');
+    });
+
+    client.on('reconnect', () => {
+      if (!isDestroyed) onStatusChange('reconnecting');
+    });
+
+    client.on('error', (err) => {
+      console.warn('Realtime broker warning:', err.message);
+    });
+  } catch (err) {
+    console.error('Failed to initialize realtime connection:', err);
   }
 
-  // Handle incoming guest joins (Host side)
-  getGuestJoin(async (guestData, peerId) => {
-    if (isDestroyed || !isHost || !guestData) return;
+  async function handleIncomingGuestJoin(guestData) {
     try {
-      // Record guest in host's IndexedDB
       const existing = await db.guests.where({ event_slug: slug, token: guestData.token }).first();
       if (!existing) {
         await db.guests.add({
@@ -152,13 +177,15 @@ export function initP2PMesh(slug, options = {}) {
         payload: guestData
       });
       // Request guest to sync their photos
-      sendSyncRequest({ timestamp: Date.now() });
+      if (client && client.connected) {
+        client.publish(topicSyncReq, JSON.stringify({ senderId: myClientId, timestamp: Date.now() }));
+      }
     } catch (e) {
-      console.error('Error handling guest join over P2P:', e);
+      console.error('Error handling guest join:', e);
     }
-  });
+  }
 
-  async function handleIncomingPhotoPayload(payload) {
+  async function handleIncomingPhotoPayload(photoData) {
     try {
       const {
         filename,
@@ -171,7 +198,7 @@ export function initP2PMesh(slug, options = {}) {
         mimeType,
         originalDataUrl,
         thumbDataUrl
-      } = payload;
+      } = photoData;
 
       let event = await db.events.where('slug').equals(slug).first();
       if (!event) {
@@ -260,120 +287,130 @@ export function initP2PMesh(slug, options = {}) {
       });
 
       // If moderation is disabled, auto-broadcast approved status to all other peers
-      if (!event.moderation_enabled) {
-        sendBroadcast({
-          type: 'photo:approved',
-          payload: formattedPhoto
-        });
+      if (!event.moderation_enabled && client && client.connected) {
+        client.publish(topicBroadcast, JSON.stringify({
+          senderId: myClientId,
+          msg: {
+            type: 'photo:approved',
+            payload: formattedPhoto
+          }
+        }));
       }
     } catch (err) {
-      console.error('Failed to process incoming P2P photo binary:', err);
+      console.error('Failed to process incoming photo payload:', err);
     }
   }
 
-  // Handle incoming photo transfers (Host side)
-  getPhotoBinary(async (payload, peerId) => {
-    if (isDestroyed || !payload) return;
-    await handleIncomingPhotoPayload(payload);
-  });
+  async function syncLocalPhotosToPeers() {
+    if (isHost || isDestroyed) return;
+    try {
+      const guestToken = localStorage.getItem(`caps_guest_${slug}`);
+      const photos = await db.photos.where('event_slug').equals(slug).toArray();
+      let guestName = 'Guest';
+      if (guestToken) {
+        const guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
+        if (guest) guestName = guest.name;
+      }
 
-  // Track connected peers
-  room.onPeerJoin((peerId) => {
-    if (isDestroyed) return;
-    connectedPeers.add(peerId);
-    onStatusChange('connected');
-    onPeerCountChange(connectedPeers.size);
-
-    if (isHost) {
-      sendSyncRequest({ timestamp: Date.now() });
-    } else {
-      syncLocalPhotosToPeers();
+      for (const photo of photos) {
+        if (photo.original_blob && photo.thumb_blob) {
+          await streamPhotoToHost({
+            filename: photo.filename,
+            hash: photo.hash,
+            width: photo.width,
+            height: photo.height,
+            size: photo.size,
+            mimeType: photo.mime_type,
+            originalBlob: photo.original_blob,
+            thumbBlob: photo.thumb_blob
+          }, {
+            name: photo.guest_name || guestName,
+            token: guestToken || ''
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Auto-sync photos error:', err);
     }
-  });
+  }
 
-  room.onPeerLeave((peerId) => {
+  async function streamPhotoToHost(processedPhoto, guestInfo, onProgress) {
     if (isDestroyed) return;
-    connectedPeers.delete(peerId);
-    if (connectedPeers.size === 0) {
-      onStatusChange('waiting');
+
+    const originalDataUrl = await blobToBase64(processedPhoto.originalBlob);
+    const thumbDataUrl = await blobToBase64(processedPhoto.thumbBlob);
+
+    const payload = {
+      filename: processedPhoto.filename,
+      guest_name: guestInfo.name,
+      guest_token: guestInfo.token,
+      hash: processedPhoto.hash,
+      width: processedPhoto.width,
+      height: processedPhoto.height,
+      size: processedPhoto.size,
+      mimeType: processedPhoto.mimeType || 'image/jpeg',
+      originalDataUrl,
+      thumbDataUrl
+    };
+
+    if (onProgress) onProgress(100);
+
+    // Publish to MQTT photos topic
+    if (client && client.connected) {
+      client.publish(topicPhotos, JSON.stringify({
+        senderId: myClientId,
+        photo: payload
+      }));
     }
-    onPeerCountChange(connectedPeers.size);
-  });
+
+    // Also mirror to local BroadcastChannel for same-browser testing
+    if (localChannel) {
+      localChannel.postMessage({
+        type: 'local:photo-streamed',
+        payload
+      });
+    }
+  }
 
   return {
-    /**
-     * Send generic broadcast message across WebRTC mesh + local BroadcastChannel
-     */
     send: (msg) => {
       if (isDestroyed || !msg) return;
-      sendBroadcast(msg);
+      if (client && client.connected) {
+        client.publish(topicBroadcast, JSON.stringify({
+          senderId: myClientId,
+          msg
+        }));
+      }
       if (localChannel) {
         localChannel.postMessage(msg);
       }
     },
 
-    /**
-     * Send guest join announcement
-     */
     notifyGuestJoin: (guestData) => {
       if (isDestroyed || !guestData) return;
-      sendGuestJoin(guestData);
+      if (client && client.connected) {
+        client.publish(topicJoins, JSON.stringify({
+          senderId: myClientId,
+          guest: guestData
+        }));
+      }
       if (localChannel) {
         localChannel.postMessage({ type: 'guest:joined', payload: guestData });
       }
     },
 
-    /**
-     * Stream captured photo over WebRTC binary action
-     */
-    streamPhotoToHost: async (processedPhoto, guestInfo, onProgress) => {
-      if (isDestroyed) return;
+    streamPhotoToHost,
 
-      const originalDataUrl = await blobToBase64(processedPhoto.originalBlob);
-      const thumbDataUrl = await blobToBase64(processedPhoto.thumbBlob);
-
-      const payload = {
-        filename: processedPhoto.filename,
-        guest_name: guestInfo.name,
-        guest_token: guestInfo.token,
-        hash: processedPhoto.hash,
-        width: processedPhoto.width,
-        height: processedPhoto.height,
-        size: processedPhoto.size,
-        mimeType: processedPhoto.mimeType || 'image/jpeg',
-        originalDataUrl,
-        thumbDataUrl
-      };
-
-      // Set up upload progress listener if provided
-      if (onProgress) {
-        onPhotoProgress((progress, peerId) => {
-          onProgress(Math.round(progress * 100));
-        });
-      }
-
-      // Stream to peers (host)
-      await sendPhotoBinary(payload);
-
-      // Also mirror to local BroadcastChannel for same-browser testing
-      if (localChannel) {
-        localChannel.postMessage({
-          type: 'local:photo-streamed',
-          payload
-        });
-      }
-    },
-
-    /**
-     * Clean up and leave WebRTC mesh room
-     */
     disconnect: () => {
       isDestroyed = true;
-      connectedPeers.clear();
       if (localChannel) {
         localChannel.close();
       }
-      room.leave();
+      if (client) {
+        try {
+          client.end(true);
+        } catch (e) {}
+      }
       onStatusChange('disconnected');
     }
   };
