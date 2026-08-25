@@ -1,9 +1,9 @@
-const CACHE_NAME = 'caps-pwa-v1';
+const CACHE_NAME = 'caps-pwa-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon.svg'
 ];
 
 // Install Event - Pre-cache App Shell
@@ -30,57 +30,25 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Network-First for API/Data, Cache-First for static assets, with offline fallback
+// Fetch Event - Stale-while-revalidate for static assets & offline SPA fallback
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip WebSocket, chrome extensions, and non-GET requests
-  if (event.request.method !== 'GET' || url.protocol.startsWith('ws') || url.protocol.startsWith('chrome-extension')) {
+  // Skip non-GET, WebSockets, Google OAuth/APIs
+  if (
+    event.request.method !== 'GET' ||
+    url.protocol.startsWith('ws') ||
+    url.hostname.includes('googleapis.com') ||
+    url.hostname.includes('accounts.google.com')
+  ) {
     return;
   }
 
-  // API or live photo data: Network first with cache fallback
-  if (url.pathname.startsWith('/api') || url.pathname.startsWith('/data')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Cache successful thumbnail and asset responses
-          if (response.ok && url.pathname.startsWith('/data/events/')) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return response;
-        })
-        .catch(async () => {
-          // If offline and request is in cache, return cached response
-          const cached = await caches.match(event.request);
-          if (cached) return cached;
-
-          // For JSON API calls while offline, return structured offline response
-          if (url.pathname.startsWith('/api')) {
-            return new Response(JSON.stringify({
-              success: false,
-              offline: true,
-              error: 'You are currently offline. Actions will be queued.'
-            }), {
-              headers: { 'Content-Type': 'application/json' }
-            });
-          }
-
-          return new Response('Offline', { status: 503, statusText: 'Offline' });
-        })
-    );
-    return;
-  }
-
-  // Static Assets / SPA Navigation: Stale-while-revalidate
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse.ok) {
+          if (networkResponse.ok && event.request.method === 'GET') {
             const clone = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, clone);
@@ -89,9 +57,8 @@ self.addEventListener('fetch', (event) => {
           return networkResponse;
         })
         .catch(() => {
-          // Fallback to index.html for SPA client routing
           if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
+            return caches.match('./index.html') || caches.match('/index.html');
           }
           return cachedResponse;
         });

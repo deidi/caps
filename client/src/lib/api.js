@@ -148,9 +148,21 @@ export function createWebSocketConnection(slugOrMessage, optionsOrStatus, maybeS
   };
 }
 
+import { exportFullEventArchive, exportSelectedPhotosZip } from './archive.js';
+import * as gdrive from './gdrive.js';
+
+export { exportFullEventArchive, exportSelectedPhotosZip, gdrive };
+
 /**
- * Trigger ZIP download stub (implemented via JSZip in Slice 6)
+ * Trigger ZIP download for selected photo IDs
  */
-export async function downloadSelectedZip(slug, ids) {
-  console.log('Download ZIP requested for', slug, ids);
+export async function downloadSelectedZip(slug, ids, onProgress) {
+  return exportSelectedPhotosZip(slug, ids, onProgress);
+}
+
+/**
+ * Trigger full event archive download (.zip)
+ */
+export async function downloadFullArchiveZip(slug, onProgress) {
+  return exportFullEventArchive(slug, onProgress);
 }

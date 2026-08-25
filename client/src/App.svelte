@@ -8,6 +8,8 @@
     setGuestToken,
     createWebSocketConnection,
     downloadSelectedZip,
+    downloadFullArchiveZip,
+    gdrive
   } from "./lib/api.js";
   import {
     enqueueOfflinePhoto,
@@ -626,6 +628,76 @@
       await loadEvents();
     } catch (err) {
       alert("Failed to bulk reject: " + err.message);
+    }
+  }
+
+  // --- GOOGLE DRIVE BACKUP & ZIP EXPORTS (Sonata Architecture) ---
+  let gdriveClientId = $state(localStorage.getItem('caps_gdrive_client_id') || '');
+  let isDriveConnected = $state(Boolean(gdrive.getStoredDriveToken()));
+  let isSyncingDrive = $state(false);
+  let driveSyncProgress = $state('');
+
+  async function handleConnectGoogleDrive() {
+    let clientId = gdriveClientId.trim();
+    if (!clientId) {
+      const inputId = prompt("Enter your Google OAuth 2.0 Client ID (from Google Cloud Console):", "");
+      if (!inputId || !inputId.trim()) return;
+      clientId = inputId.trim();
+      gdriveClientId = clientId;
+      localStorage.setItem('caps_gdrive_client_id', clientId);
+    }
+    try {
+      await gdrive.requestGoogleDriveAuth(clientId);
+      isDriveConnected = true;
+      successMsg = "Connected to Google Drive!";
+      setTimeout(() => successMsg = "", 3000);
+    } catch (err) {
+      alert("Google Drive connection failed: " + err.message);
+    }
+  }
+
+  function handleDisconnectGoogleDrive() {
+    gdrive.disconnectGoogleDrive();
+    isDriveConnected = false;
+    successMsg = "Disconnected from Google Drive.";
+    setTimeout(() => successMsg = "", 3000);
+  }
+
+  async function handleSyncToGoogleDrive(slug) {
+    if (!isDriveConnected) {
+      await handleConnectGoogleDrive();
+      if (!isDriveConnected) return;
+    }
+    isSyncingDrive = true;
+    driveSyncProgress = "Starting Google Drive sync...";
+    try {
+      const res = await gdrive.syncEventToGoogleDrive(slug, (p) => {
+        driveSyncProgress = p.message || `Syncing ${p.percent || 0}%...`;
+      });
+      successMsg = `Successfully synced ${res.synced_count} photos to Google Drive!`;
+      setTimeout(() => successMsg = "", 5000);
+    } catch (err) {
+      alert("Google Drive sync failed: " + err.message);
+    } finally {
+      isSyncingDrive = false;
+      driveSyncProgress = "";
+    }
+  }
+
+  let isExportingArchive = $state(false);
+  async function handleExportFullArchive(slug) {
+    isExportingArchive = true;
+    try {
+      await downloadFullArchiveZip(slug, (p) => {
+        uploadProgressText = p.message || `Generating archive...`;
+      });
+      successMsg = "Full archive downloaded!";
+      setTimeout(() => successMsg = "", 4000);
+    } catch (err) {
+      alert("Failed to export archive: " + err.message);
+    } finally {
+      isExportingArchive = false;
+      uploadProgressText = "";
     }
   }
 
@@ -1575,13 +1647,13 @@
                     {isSelectionMode ? "Cancel Selection" : "Select Photos"}
                   </button>
 
-                  <a
-                    href="/api/events/{guestEventData.slug}/photos/download-all"
-                    download
+                  <button
                     class="btn-secondary btn-sm"
+                    disabled={isExportingArchive}
+                    onclick={() => handleExportFullArchive(guestEventData.slug)}
                   >
-                    <span>💾</span> Download All (.ZIP)
-                  </a>
+                    <span>💾</span> {isExportingArchive ? "Packaging ZIP..." : "Download All (.ZIP)"}
+                  </button>
                 {/if}
 
                 <div class="live-dot-badge">
@@ -1951,14 +2023,22 @@
               >
                 <span>📺</span> Launch TV Slideshow
               </button>
-              <a
-                href="/api/events/{selectedEvent.slug}/export"
-                download
+              <button
                 class="btn-secondary"
+                disabled={isExportingArchive}
+                onclick={() => handleExportFullArchive(selectedEvent.slug)}
                 title="Full Archive: metadata.json + photos"
               >
-                <span>📦</span> Export Full Archive
-              </a>
+                <span>📦</span> {isExportingArchive ? "Packaging Archive..." : "Export Full Archive"}
+              </button>
+              <button
+                class="btn-secondary"
+                disabled={isSyncingDrive}
+                onclick={() => handleSyncToGoogleDrive(selectedEvent.slug)}
+                title="1-Click Cloud Sync to Google Drive"
+              >
+                <span>☁️</span> {isSyncingDrive ? (driveSyncProgress || "Syncing...") : (isDriveConnected ? "Sync to Google Drive" : "Connect Google Drive")}
+              </button>
               <button
                 class="btn-secondary"
                 onclick={() => openQrModal(selectedEvent, false)}

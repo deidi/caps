@@ -1,19 +1,14 @@
 {
-  "name": "caps-workspace",
-  "version": "1.0.0",
+  "name": "caps-v2-serverless",
+  "version": "2.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node server/src/launcher.js",
-    "launch": "node server/src/launcher.js",
-    "server:start": "npm --prefix server start",
-    "server:dev": "npm --prefix server run dev",
-    "client:dev": "npm --prefix client run dev",
-    "client:build": "npm --prefix client run build",
+    "dev": "npm --prefix client run dev",
     "build": "npm --prefix client run build",
-    "test": "node server/test-slice10.js",
-    "test:all": "node server/test-slice1.js && node server/test-slice2.js && node server/test-slice3.js && node server/test-slice4.js && node server/test-slice5.js && node server/test-slice6.js && node server/test-slice7.js && node server/test-slice8.js && node server/test-slice9.js && node server/test-slice10.js",
-    "db:reset": "node server/src/reset-db.js",
-    "clean": "node server/src/reset-db.js",
-    "package:offline": "powershell -ExecutionPolicy Bypass -File ./build-offline-dist.ps1"
+    "preview": "npm --prefix client run preview",
+    "start": "npm --prefix client run preview",
+    "client:dev": "npm --prefix client run dev",
+    "client:build": "npm --prefix client run build"
   }
 }
