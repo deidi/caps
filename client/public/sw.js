@@ -1,4 +1,4 @@
-const CACHE_NAME = 'caps-pwa-v2.2';
+const CACHE_NAME = 'caps-pwa-v2.3';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -6,16 +6,17 @@ const STATIC_ASSETS = [
   './icon.svg'
 ];
 
-// Install Event - Pre-cache App Shell
+// Install Event - Pre-cache App Shell & Skip Waiting Immediately
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
-// Activate Event - Clean up stale caches
+// Activate Event - Clean up stale caches & Claim Clients Immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -30,7 +31,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Stale-while-revalidate for static assets & offline SPA fallback
+// Fetch Event - Network-First with Offline Cache Fallback
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -45,25 +46,24 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse.ok && event.request.method === 'GET') {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clone);
-            });
-          }
-          return networkResponse;
-        })
-        .catch(() => {
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse.ok && event.request.method === 'GET') {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, clone);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cached) => {
+          if (cached) return cached;
           if (event.request.mode === 'navigate') {
-            return caches.match('./index.html') || caches.match('/index.html');
+            return caches.match('./index.html') || caches.match('./');
           }
-          return cachedResponse;
+          return new Response('Offline', { status: 503, statusText: 'Offline' });
         });
-
-      return cachedResponse || fetchPromise;
-    })
+      })
   );
 });
