@@ -631,7 +631,7 @@
     }
   }
 
-  // --- GOOGLE DRIVE BACKUP & ZIP EXPORTS (Sonata Architecture) ---
+  // --- GOOGLE DRIVE BACKUP & ZIP EXPORTS (Client-Side Storage) ---
   let gdriveClientId = $state(localStorage.getItem('caps_gdrive_client_id') || '');
   let isDriveConnected = $state(Boolean(gdrive.getStoredDriveToken()));
   let isSyncingDrive = $state(false);
