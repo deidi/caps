@@ -58,7 +58,7 @@ export function initP2PMesh(slug, options = {}) {
     };
   }
 
-  // WebRTC Trystero Room using multiple high-availability Nostr relays
+  // WebRTC Trystero Room using multiple high-availability Nostr relays and STUN servers
   const room = joinRoom({
     appId: APP_ID,
     relayUrls: [
@@ -67,7 +67,17 @@ export function initP2PMesh(slug, options = {}) {
       'wss://nos.lol',
       'wss://relay.primal.net',
       'wss://nostr.mom'
-    ]
+    ],
+    rtcConfig: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      ]
+    }
   }, `caps-room-${slug}`);
 
   onStatusChange('connecting');
@@ -81,11 +91,53 @@ export function initP2PMesh(slug, options = {}) {
   // 3. Guest Join Action
   const [sendGuestJoin, getGuestJoin] = room.makeAction('guest_join');
 
+  // 4. Request Sync Action (Host requests guest to push photos)
+  const [sendSyncRequest, getSyncRequest] = room.makeAction('sync_request');
+
   // Handle incoming broadcast messages from peers
   getBroadcast((data, peerId) => {
     if (isDestroyed || !data) return;
     onMessage(data);
   });
+
+  // Handle incoming sync requests (Guest side)
+  getSyncRequest(async (data, peerId) => {
+    if (isDestroyed || isHost) return;
+    await syncLocalPhotosToPeers();
+  });
+
+  async function syncLocalPhotosToPeers() {
+    if (isHost || isDestroyed) return;
+    try {
+      const guestToken = localStorage.getItem(`caps_guest_${slug}`);
+      const photos = await db.photos.where('event_slug').equals(slug).toArray();
+      let guestName = 'Guest';
+      if (guestToken) {
+        const guest = await db.guests.where({ event_slug: slug, token: guestToken }).first();
+        if (guest) guestName = guest.name;
+      }
+
+      for (const photo of photos) {
+        if (photo.original_blob && photo.thumb_blob) {
+          await streamPhotoToHost({
+            filename: photo.filename,
+            hash: photo.hash,
+            width: photo.width,
+            height: photo.height,
+            size: photo.size,
+            mimeType: photo.mime_type,
+            originalBlob: photo.original_blob,
+            thumbBlob: photo.thumb_blob
+          }, {
+            name: photo.guest_name || guestName,
+            token: guestToken || ''
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Auto-sync photos on peer join error:', err);
+    }
+  }
 
   // Handle incoming guest joins (Host side)
   getGuestJoin(async (guestData, peerId) => {
@@ -106,6 +158,8 @@ export function initP2PMesh(slug, options = {}) {
         type: 'guest:joined',
         payload: guestData
       });
+      // Request guest to sync their photos
+      sendSyncRequest({ timestamp: Date.now() });
     } catch (e) {
       console.error('Error handling guest join over P2P:', e);
     }
@@ -236,6 +290,12 @@ export function initP2PMesh(slug, options = {}) {
     connectedPeers.add(peerId);
     onStatusChange('connected');
     onPeerCountChange(connectedPeers.size);
+
+    if (isHost) {
+      sendSyncRequest({ timestamp: Date.now() });
+    } else {
+      syncLocalPhotosToPeers();
+    }
   });
 
   room.onPeerLeave((peerId) => {
