@@ -1,4 +1,4 @@
-import { joinRoom } from 'trystero/nostr';
+import { joinRoom } from '@trystero-p2p/mqtt';
 import { db, getCachedObjectURL } from './db.js';
 
 const APP_ID = 'caps-photo-hub-v2';
@@ -58,16 +58,9 @@ export function initP2PMesh(slug, options = {}) {
     };
   }
 
-  // WebRTC Trystero Room using multiple high-availability Nostr relays and STUN servers
+  // WebRTC Trystero Room using MQTT WebSocket brokers and STUN servers
   const room = joinRoom({
     appId: APP_ID,
-    relayUrls: [
-      'wss://relay.damus.io',
-      'wss://relay.snort.social',
-      'wss://nos.lol',
-      'wss://relay.primal.net',
-      'wss://nostr.mom'
-    ],
     rtcConfig: {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
