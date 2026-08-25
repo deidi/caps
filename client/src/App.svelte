@@ -263,7 +263,7 @@
         const photo = msg.payload;
         // 1. Update status in myUploads
         myUploads = myUploads.map((p) =>
-          p.hash === photo.hash || p.id === photo.id
+          (p.hash === photo.hash || p.id === photo.id)
             ? { ...p, status: "approved" }
             : p,
         );
@@ -279,26 +279,22 @@
 
         // 3. Find or construct the photo object with valid local Object URL
         const localMatch = myUploads.find((p) => p.hash === photo.hash);
-        let galleryItem = localMatch
-          ? { ...localMatch, status: "approved" }
-          : null;
+        let galleryItem = null;
 
-        if (!galleryItem && photo.thumbDataUrl) {
+        if (localMatch) {
+          galleryItem = { ...localMatch, status: "approved" };
+        } else if (photo.thumbDataUrl) {
           const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-          const origBlob = photo.originalDataUrl
-            ? base64ToBlob(photo.originalDataUrl)
-            : thumbBlob;
           const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
-          const origUrl = origBlob ? URL.createObjectURL(origBlob) : "";
           galleryItem = {
             ...photo,
             status: "approved",
             thumb_url: thumbUrl,
-            original_url: origUrl,
+            original_url: thumbUrl,
             thumbnail_path: thumbUrl,
-            original_path: origUrl,
+            original_path: thumbUrl,
           };
-        } else if (!galleryItem) {
+        } else {
           galleryItem = { ...photo, status: "approved" };
         }
 
@@ -311,7 +307,7 @@
           liveGalleryPhotos = [galleryItem, ...liveGalleryPhotos];
         } else {
           liveGalleryPhotos = liveGalleryPhotos.map((p) =>
-            p.hash === photo.hash || p.id === photo.id
+            (p.hash === photo.hash || p.id === photo.id)
               ? { ...p, ...galleryItem, status: "approved" }
               : p,
           );
@@ -633,20 +629,21 @@
         if (wsHandle) {
           const dbRecord = await db.photos.get(photoId);
           let thumbDataUrl = photo.thumbDataUrl;
-          let originalDataUrl = photo.originalDataUrl;
           if (!thumbDataUrl && dbRecord?.thumb_blob) {
             thumbDataUrl = await blobToBase64(dbRecord.thumb_blob);
-          }
-          if (!originalDataUrl && dbRecord?.original_blob) {
-            originalDataUrl = await blobToBase64(dbRecord.original_blob);
           }
 
           wsHandle.send({
             type: "photo:approved",
             payload: {
-              ...approvedItem,
+              id: approvedItem.id,
+              hash: approvedItem.hash,
+              event_slug: approvedItem.event_slug,
+              guest_name: approvedItem.guest_name,
+              status: "approved",
+              created_at: approvedItem.created_at,
+              filename: approvedItem.filename,
               thumbDataUrl,
-              originalDataUrl,
             },
           });
         }

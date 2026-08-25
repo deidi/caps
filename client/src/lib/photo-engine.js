@@ -50,10 +50,10 @@ async function renderToBlob(imgSource, targetWidth, targetHeight, quality = 0.85
  * - Generates fast 360px thumbnail
  */
 export async function processPhotoClient(file, options = {}) {
-  const maxDimension = options.maxDimension || 2048;
+  const maxDimension = options.maxDimension || 1600;
   const thumbDimension = options.thumbDimension || 360;
-  const quality = options.quality || 0.88;
-  const thumbQuality = options.thumbQuality || 0.75;
+  const quality = options.quality || 0.80;
+  const thumbQuality = options.thumbQuality || 0.65;
 
   // 1. Compute SHA-256 duplicate hash from raw input
   const hash = await computePhotoHash(file);
