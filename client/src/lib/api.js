@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+import * as dbMethods from './db.js';
 
 export function getSessionToken() {
   return localStorage.getItem('caps_host_token') || '';
@@ -24,228 +24,128 @@ export function setGuestToken(slug, token) {
   }
 }
 
-export async function apiRequest(endpoint, options = {}) {
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
-  const isFormData = options.body instanceof FormData;
-
-  const headers = {
-    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-    ...(options.headers || {})
-  };
-
-  const token = getSessionToken();
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(url, {
-    ...options,
-    headers
-  });
-
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Request failed with status ${res.status}`);
-    }
-    return data;
-  }
-
-  if (!res.ok) {
-    throw new Error(`Request failed with status ${res.status}`);
-  }
-
-  return res;
-}
-
+/**
+ * Unified Client-Side Engine API
+ * Directly interacts with browser IndexedDB (Dexie.js) - Zero Node.js backend required!
+ */
 export const api = {
   // Auth & Setup
-  getAuthStatus: () => apiRequest('/auth/status'),
-  setupHost: (host_name, pin) => apiRequest('/auth/setup', {
-    method: 'POST',
-    body: JSON.stringify({ host_name, pin })
-  }),
-  verifyPin: (pin) => apiRequest('/auth/verify-pin', {
-    method: 'POST',
-    body: JSON.stringify({ pin })
-  }),
+  getAuthStatus: () => dbMethods.getAuthStatus(),
+  setupHost: (host_name, pin) => dbMethods.setupHost(host_name, pin),
+  verifyPin: (pin) => dbMethods.verifyPin(pin),
 
   // Events
-  getEvents: () => apiRequest('/events'),
-  getEvent: (slug) => apiRequest(`/events/${slug}`),
-  createEvent: (eventData) => apiRequest('/events', {
-    method: 'POST',
-    body: JSON.stringify(eventData)
-  }),
-  getEventQR: (slug, hostType = 'ip') => apiRequest(`/events/${slug}/qr?format=dataurl&host_type=${hostType}`),
+  getEvents: () => dbMethods.getEvents(),
+  getEvent: (slug) => dbMethods.getEvent(slug),
+  createEvent: (eventData) => dbMethods.createEvent(eventData),
+  getEventQR: (slug, hostType = 'web') => dbMethods.getEventQR(slug),
 
   // Guest actions
-  joinEvent: (slug, name) => apiRequest(`/events/${slug}/join`, {
-    method: 'POST',
-    body: JSON.stringify({ name })
-  }),
-  getGuestSession: (slug, guestToken) => apiRequest(`/events/${slug}/guest-session`, {
-    headers: { 'X-Guest-Token': guestToken }
-  }),
+  joinEvent: (slug, name) => dbMethods.joinEvent(slug, name),
+  getGuestSession: (slug, guestToken) => dbMethods.getGuestSession(slug, guestToken),
 
-  // Photos
-  uploadPhoto: (slug, file, guestToken) => {
-    const formData = new FormData();
-    formData.append('photo', file);
-    return apiRequest(`/events/${slug}/photos`, {
-      method: 'POST',
-      body: formData,
-      headers: guestToken ? { 'X-Guest-Token': guestToken } : {}
-    });
+  // Photos (Local IndexedDB stubs - enhanced in Slice 2)
+  uploadPhoto: async (slug, file, guestToken) => {
+    // Will be fully handled by photo-engine.js in Slice 2
+    return { success: true, message: 'Photo engine will process in Slice 2' };
   },
-  getPhotos: (slug, options = {}) => {
-    const params = new URLSearchParams();
-    if (options.status) params.append('status', options.status);
-    if (options.guest) params.append('guest', options.guest);
-    const queryString = params.toString() ? `?${params.toString()}` : '';
-    const headers = options.guestToken ? { 'X-Guest-Token': options.guestToken } : {};
-    return apiRequest(`/events/${slug}/photos${queryString}`, { headers });
+  getPhotos: async (slug, options = {}) => {
+    const photos = await dbMethods.db.photos.where('event_slug').equals(slug).toArray();
+    let filtered = photos;
+    if (options.status) {
+      filtered = filtered.filter(p => p.status === options.status);
+    }
+    return { success: true, photos: filtered };
   },
-  getMyQuota: (slug, guestToken) => apiRequest(`/events/${slug}/photos/my-quota`, {
-    headers: { 'X-Guest-Token': guestToken }
-  }),
-  deletePhoto: (slug, photoId, guestToken) => {
-    const headers = guestToken ? { 'X-Guest-Token': guestToken } : {};
-    return apiRequest(`/events/${slug}/photos/${photoId}`, {
-      method: 'DELETE',
-      headers
-    });
+  getMyQuota: async (slug, guestToken) => {
+    const guest = await dbMethods.db.guests.where({ event_slug: slug, token: guestToken }).first();
+    const event = await dbMethods.db.events.where('slug').equals(slug).first();
+    const upload_count = guest ? guest.upload_count : 0;
+    const limit = event ? event.guest_upload_limit : 20;
+    return {
+      success: true,
+      quota: {
+        upload_count,
+        limit,
+        remaining: Math.max(0, limit - upload_count)
+      }
+    };
+  },
+  deletePhoto: async (slug, photoId) => {
+    await dbMethods.db.photos.delete(parseInt(photoId, 10));
+    return { success: true };
   },
 
-  // Moderation (Host Only)
-  patchPhotoStatus: (slug, photoId, status) => apiRequest(`/events/${slug}/photos/${photoId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status })
-  }),
-  bulkPatchPhotoStatus: (slug, ids, status) => apiRequest(`/events/${slug}/photos/bulk`, {
-    method: 'PATCH',
-    body: JSON.stringify({ ids, status })
-  }),
+  // Moderation (Host Only - enhanced in Slice 4)
+  patchPhotoStatus: async (slug, photoId, status) => {
+    await dbMethods.db.photos.update(parseInt(photoId, 10), { status });
+    return { success: true, status };
+  },
+  bulkPatchPhotoStatus: async (slug, ids, status) => {
+    await dbMethods.db.transaction('rw', dbMethods.db.photos, async () => {
+      for (const id of ids) {
+        await dbMethods.db.photos.update(parseInt(id, 10), { status });
+      }
+    });
+    return { success: true, updated_count: ids.length };
+  },
 
   // Slideshow
-  getSlideshowConfig: (slug, hostType = 'ip') => apiRequest(`/events/${slug}/slideshow-config?host_type=${hostType}`),
-  updateSlideshowConfig: (slug, config) => apiRequest(`/events/${slug}/slideshow-config`, {
-    method: 'PATCH',
-    body: JSON.stringify(config)
-  }),
+  getSlideshowConfig: async (slug) => {
+    const qr = await dbMethods.getEventQR(slug);
+    return {
+      success: true,
+      config: {
+        interval: 5,
+        transition: 'fade',
+        show_qr: true,
+        show_author: true,
+        qr_data_url: qr.qr_data_url,
+        join_url: qr.join_url
+      }
+    };
+  },
+  updateSlideshowConfig: async (slug, config) => {
+    return { success: true, config };
+  },
 
   // Lifecycle & Analytics (Host Only)
-  updateEventStatus: (slug, status) => apiRequest(`/events/${slug}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status })
-  }),
-  deleteEvent: (slug) => apiRequest(`/events/${slug}`, {
-    method: 'DELETE'
-  }),
-  getEventAnalytics: (slug) => apiRequest(`/events/${slug}/analytics`),
+  updateEventStatus: (slug, status) => dbMethods.updateEventStatus(slug, status),
+  deleteEvent: (slug) => dbMethods.deleteEvent(slug),
+  getEventAnalytics: (slug) => dbMethods.getEventAnalytics(slug),
 
-  // Per-Event Branding (Host Only)
+  // Per-Event Branding
   uploadEventLogo: async (slug, file) => {
-    const formData = new FormData();
-    formData.append('logo', file);
-    const token = getSessionToken();
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const res = await fetch(`/api/events/${slug}/logo`, {
-      method: 'POST',
-      headers,
-      body: formData
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to upload logo');
-    return data;
+    return { success: true };
   },
-  deleteEventLogo: (slug) => apiRequest(`/events/${slug}/logo`, { method: 'DELETE' }),
-  updateEventBranding: (slug, branding) => apiRequest(`/events/${slug}/branding`, {
-    method: 'PATCH',
-    body: JSON.stringify(branding)
-  })
+  deleteEventLogo: async (slug) => {
+    return { success: true };
+  },
+  updateEventBranding: async (slug, branding) => {
+    return { success: true, branding };
+  }
 };
 
 /**
- * Trigger ZIP download for selected photo IDs
+ * P2P WebRTC / Realtime connection mock handle for Slice 1
+ * (Will connect to Trystero WebRTC mesh in Slice 3)
  */
-export async function downloadSelectedZip(slug, ids) {
-  const res = await fetch(`/api/events/${slug}/photos/download-zip`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids })
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to generate ZIP');
-  }
-
-  const blob = await res.blob();
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `caps-${slug}-selected.zip`;
-  document.body.appendChild(a);
-  a.click();
-  window.URL.revokeObjectURL(url);
-  document.body.removeChild(a);
+export function createWebSocketConnection(onMessage, onStatusChange, slug = null) {
+  if (onStatusChange) onStatusChange('connected');
+  
+  return {
+    send: (msg) => {
+      // Local broadcast placeholder
+    },
+    close: () => {
+      if (onStatusChange) onStatusChange('disconnected');
+    }
+  };
 }
 
 /**
- * Robust WebSocket client with auto-reconnection
+ * Trigger ZIP download stub (implemented via JSZip in Slice 6)
  */
-export function createWebSocketConnection(slug, { onMessage, onStatusChange, isHost = false }) {
-  let ws = null;
-  let retryCount = 0;
-  let isClosedManually = false;
-
-  function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
-
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      retryCount = 0;
-      onStatusChange?.('connected');
-      const hostToken = isHost ? getSessionToken() : null;
-      ws.send(JSON.stringify({ type: 'join', slug, host_token: hostToken }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessage?.(data);
-      } catch (err) {
-        console.error('Error parsing WS message:', err);
-      }
-    };
-
-    ws.onclose = () => {
-      onStatusChange?.('disconnected');
-      if (!isClosedManually) {
-        const delay = Math.min(1000 * Math.pow(1.5, retryCount), 10000);
-        retryCount++;
-        setTimeout(connect, delay);
-      }
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-  }
-
-  connect();
-
-  return {
-    disconnect: () => {
-      isClosedManually = true;
-      if (ws) ws.close();
-    }
-  };
+export async function downloadSelectedZip(slug, ids) {
+  console.log('Download ZIP requested for', slug, ids);
 }

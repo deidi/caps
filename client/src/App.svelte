@@ -113,7 +113,13 @@
   let wsHandle = null;
 
   function parseRoute() {
-    const path = window.location.pathname;
+    let path = window.location.pathname;
+    if (window.location.hash && window.location.hash.startsWith('#')) {
+      const hashPart = window.location.hash.substring(1);
+      if (hashPart.startsWith('/')) {
+        path = hashPart;
+      }
+    }
     currentPath = path;
 
     const slideshowMatch = path.match(
@@ -140,7 +146,11 @@
   }
 
   function navigate(url) {
-    window.history.pushState({}, "", url);
+    if (window.location.hash || window.location.protocol === 'file:') {
+      window.location.hash = url.startsWith('/') ? url : `/${url}`;
+    } else {
+      window.history.pushState({}, "", url);
+    }
     parseRoute();
     initView();
   }
@@ -1000,6 +1010,7 @@
   onMount(() => {
     initView();
     window.addEventListener("popstate", parseRoute);
+    window.addEventListener("hashchange", parseRoute);
     window.addEventListener("keydown", handleKeyDown);
 
     const updateOnlineStatus = () => {
@@ -1021,6 +1032,7 @@
 
     return () => {
       window.removeEventListener("popstate", parseRoute);
+      window.removeEventListener("hashchange", parseRoute);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("online", updateOnlineStatus);
       window.removeEventListener("offline", updateOnlineStatus);
