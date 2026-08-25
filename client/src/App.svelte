@@ -527,7 +527,14 @@
       const photo = pendingPhotos.find((p) => p.id === photoId);
       pendingPhotos = pendingPhotos.filter((p) => p.id !== photoId);
       if (photo) {
-        approvedPhotos = [{ ...photo, status: "approved" }, ...approvedPhotos];
+        const approvedItem = { ...photo, status: "approved" };
+        approvedPhotos = [approvedItem, ...approvedPhotos];
+        if (wsHandle) {
+          wsHandle.send({
+            type: "photo:approved",
+            payload: approvedItem,
+          });
+        }
       }
       await loadEvents();
     } catch (err) {
@@ -539,6 +546,12 @@
     try {
       await api.patchPhotoStatus(selectedEvent.slug, photoId, "rejected");
       pendingPhotos = pendingPhotos.filter((p) => p.id !== photoId);
+      if (wsHandle) {
+        wsHandle.send({
+          type: "photo:deleted",
+          payload: { id: photoId },
+        });
+      }
       await loadEvents();
     } catch (err) {
       alert("Failed to reject photo: " + err.message);
@@ -556,10 +569,17 @@
         (res && res.photo) || approvedPhotos.find((p) => p.id === photoId);
       approvedPhotos = approvedPhotos.filter((p) => p.id !== photoId);
       if (photo) {
+        const revertedItem = { ...photo, status: "pending" };
         pendingPhotos = [
-          { ...photo, status: "pending" },
+          revertedItem,
           ...pendingPhotos.filter((p) => p.id !== photoId),
         ];
+        if (wsHandle) {
+          wsHandle.send({
+            type: "photo:removed",
+            payload: { id: photoId },
+          });
+        }
       }
       await loadEvents();
     } catch (err) {
@@ -578,6 +598,12 @@
       }));
       approvedPhotos = [...newlyApproved, ...approvedPhotos];
       pendingPhotos = [];
+      if (wsHandle && newlyApproved.length > 0) {
+        wsHandle.send({
+          type: "photo:bulk-approved",
+          payload: { photos: newlyApproved },
+        });
+      }
       await loadEvents();
     } catch (err) {
       alert("Failed to bulk approve: " + err.message);
@@ -591,6 +617,12 @@
     try {
       await api.bulkPatchPhotoStatus(selectedEvent.slug, ids, "rejected");
       pendingPhotos = [];
+      if (wsHandle) {
+        wsHandle.send({
+          type: "photo:bulk-removed",
+          payload: { ids },
+        });
+      }
       await loadEvents();
     } catch (err) {
       alert("Failed to bulk reject: " + err.message);
