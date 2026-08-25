@@ -1,4 +1,4 @@
-const CACHE_NAME = 'caps-pwa-v2';
+const CACHE_NAME = 'caps-pwa-v2.2';
 const STATIC_ASSETS = [
   './',
   './index.html',

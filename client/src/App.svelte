@@ -18,7 +18,7 @@
   } from "./lib/offline-queue.js";
 
   // Global app state
-  let loading = $state(true);
+  let loading = $state(false);
   let errorMsg = $state("");
   let successMsg = $state("");
   let authStatus = $state({
@@ -161,7 +161,6 @@
   }
 
   async function initView() {
-    loading = true;
     errorMsg = "";
     successMsg = "";
     isSelectionMode = false;
