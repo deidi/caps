@@ -97,6 +97,7 @@ export const api = {
   },
 
   // Lifecycle & Analytics (Host Only)
+  updateEvent: (slug, data) => dbMethods.updateEvent(slug, data),
   updateEventStatus: (slug, status) => dbMethods.updateEventStatus(slug, status),
   deleteEvent: (slug) => dbMethods.deleteEvent(slug),
   getEventAnalytics: (slug) => dbMethods.getEventAnalytics(slug),

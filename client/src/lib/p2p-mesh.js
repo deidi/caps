@@ -168,9 +168,9 @@ export function initP2PMesh(slug, options = {}) {
     async function broadcastApprovedGalleryToPeers() {
       if (!isHost || isDestroyed || !client || !client.connected) return;
       try {
+        const event = await db.events.where('slug').equals(slug).first();
         const allPhotos = await db.photos.where('event_slug').equals(slug).toArray();
         const approved = allPhotos.filter(p => p.status === 'approved');
-        if (!approved.length) return;
 
         const payloadPhotos = [];
         for (const p of approved) {
@@ -192,7 +192,14 @@ export function initP2PMesh(slug, options = {}) {
 
         client.publish(topicGallerySync, JSON.stringify({
           senderId: myClientId,
-          photos: payloadPhotos
+          photos: payloadPhotos,
+          event_settings: event ? {
+            name: event.name,
+            tagline: event.tagline,
+            guest_upload_limit: event.guest_upload_limit,
+            moderation_enabled: event.moderation_enabled,
+            status: event.status
+          } : null
         }));
       } catch (err) {
         console.warn('Failed to broadcast approved gallery:', err);

@@ -218,6 +218,26 @@
       if (selectedEvent && selectedEvent.slug === msg.payload.slug) {
         selectedEvent.status = msg.payload.status;
       }
+    } else if (msg.type === "event:settings-updated") {
+      if (guestEventData && guestEventData.slug === msg.payload.slug) {
+        if (msg.payload.event_settings) {
+          guestEventData = { ...guestEventData, ...msg.payload.event_settings };
+          if (guestSession) {
+            const limit = Number(msg.payload.event_settings.guest_upload_limit) || 20;
+            const used = Number(guestSession.guest.upload_count) || 0;
+            guestSession.quota = {
+              used,
+              limit,
+              remaining: Math.max(0, limit - used),
+            };
+          }
+        }
+      }
+      if (selectedEvent && selectedEvent.slug === msg.payload.slug) {
+        if (msg.payload.event_settings) {
+          selectedEvent = { ...selectedEvent, ...msg.payload.event_settings };
+        }
+      }
     } else if (msg.type === "event:deleted") {
       if (
         (guestEventData && guestEventData.slug === msg.payload.slug) ||
@@ -930,6 +950,41 @@
       await loadEvents();
     } catch (err) {
       alert("Failed to save branding: " + err.message);
+    }
+  }
+
+  async function handleSaveEventSettings() {
+    if (!selectedEvent) return;
+    try {
+      const res = await api.updateEvent(selectedEvent.slug, {
+        name: selectedEvent.name,
+        tagline: selectedEvent.tagline,
+        guest_upload_limit: Number(selectedEvent.guest_upload_limit) || 20,
+        moderation_enabled: selectedEvent.moderation_enabled,
+        exif_strip: selectedEvent.exif_strip,
+      });
+      selectedEvent = { ...selectedEvent, ...res.event };
+      successMsg = "Event settings & upload limit saved successfully!";
+      setTimeout(() => (successMsg = ""), 3000);
+
+      if (wsHandle) {
+        wsHandle.send({
+          type: "event:settings-updated",
+          payload: {
+            slug: selectedEvent.slug,
+            event_settings: {
+              name: selectedEvent.name,
+              tagline: selectedEvent.tagline,
+              guest_upload_limit: selectedEvent.guest_upload_limit,
+              moderation_enabled: selectedEvent.moderation_enabled,
+              status: selectedEvent.status,
+            },
+          },
+        });
+      }
+      await loadEvents();
+    } catch (err) {
+      alert("Failed to save event settings: " + err.message);
     }
   }
 
@@ -2826,6 +2881,61 @@
                     Save Tagline
                   </button>
                 </div>
+              </div>
+            </div>
+
+            <!-- Event Rules & Upload Limits -->
+            <div
+              style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.75rem; max-width: 540px;"
+            >
+              <h4 style="margin-bottom: 0.75rem;">Event Rules & Limits</h4>
+              
+              <div class="form-stack">
+                <div>
+                  <label class="form-label" for="eventLimitInput">Per-Guest Upload Limit (photos)</label>
+                  <input
+                    id="eventLimitInput"
+                    type="number"
+                    min="1"
+                    max="500"
+                    class="input-field"
+                    bind:value={selectedEvent.guest_upload_limit}
+                  />
+                  <span class="helper-text">Number of photos each attendee is allowed to share.</span>
+                </div>
+
+                <div class="checkbox-row" style="margin-top: 0.5rem;">
+                  <input
+                    id="eventModToggle"
+                    type="checkbox"
+                    bind:checked={selectedEvent.moderation_enabled}
+                  />
+                  <label for="eventModToggle">
+                    <strong>Enable Live Photo Moderation</strong>
+                    <span class="helper-text">When checked, photos require admin approval before appearing on the live wall.</span>
+                  </label>
+                </div>
+
+                <div class="checkbox-row">
+                  <input
+                    id="eventExifToggle"
+                    type="checkbox"
+                    bind:checked={selectedEvent.exif_strip}
+                  />
+                  <label for="eventExifToggle">
+                    <strong>Strip GPS & EXIF Metadata</strong>
+                    <span class="helper-text">Removes GPS location and private camera metadata for attendee privacy.</span>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  class="btn-primary btn-sm"
+                  style="align-self: flex-start; margin-top: 0.75rem;"
+                  onclick={handleSaveEventSettings}
+                >
+                  Save Limit & Rules
+                </button>
               </div>
             </div>
 

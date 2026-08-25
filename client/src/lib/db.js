@@ -255,6 +255,25 @@ export async function createEvent(data) {
 }
 
 /**
+ * Update event settings (e.g. upload limit, moderation, tagline)
+ */
+export async function updateEvent(slug, updates = {}) {
+  const event = await db.events.where('slug').equals(slug).first();
+  if (!event) throw new Error('Event not found');
+
+  const patch = {};
+  if (updates.name !== undefined) patch.name = updates.name.trim();
+  if (updates.tagline !== undefined) patch.tagline = updates.tagline.trim();
+  if (updates.guest_upload_limit !== undefined) patch.guest_upload_limit = Number(updates.guest_upload_limit) || 20;
+  if (updates.moderation_enabled !== undefined) patch.moderation_enabled = Boolean(updates.moderation_enabled);
+  if (updates.exif_strip !== undefined) patch.exif_strip = Boolean(updates.exif_strip);
+
+  await db.events.update(event.id, patch);
+  const updated = await db.events.get(event.id);
+  return { success: true, event: updated };
+}
+
+/**
  * Update event status (e.g. active, archived)
  */
 export async function updateEventStatus(slug, status) {
