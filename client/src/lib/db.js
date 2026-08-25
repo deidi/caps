@@ -165,9 +165,27 @@ export async function getEvents() {
  * Get single event by slug
  */
 export async function getEvent(slug) {
-  const event = await db.events.where('slug').equals(slug).first();
+  let event = await db.events.where('slug').equals(slug).first();
   if (!event) {
-    throw new Error('Event not found');
+    // For guest devices joining from another phone/device:
+    // Dynamically initialize guest event space locally
+    const formattedName = slug
+      .split('-')
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ');
+
+    const newGuestEvent = {
+      slug,
+      name: formattedName,
+      date: new Date().toISOString().split('T')[0],
+      tagline: 'Memories Shared in Real-Time',
+      moderation_enabled: true,
+      guest_upload_limit: 20,
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    await db.events.put(newGuestEvent);
+    event = newGuestEvent;
   }
 
   const total_photos = await db.photos.where('event_slug').equals(slug).count();
