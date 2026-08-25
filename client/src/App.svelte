@@ -9,7 +9,7 @@
     createWebSocketConnection,
     downloadSelectedZip,
     downloadFullArchiveZip,
-    gdrive
+    gdrive,
   } from "./lib/api.js";
   import {
     enqueueOfflinePhoto,
@@ -119,13 +119,13 @@
     let path = window.location.pathname;
 
     // Strip out base repo directory if present in pathname
-    if (path.includes('/event/')) {
-      path = path.substring(path.indexOf('/event/'));
+    if (path.includes("/event/")) {
+      path = path.substring(path.indexOf("/event/"));
     }
 
-    if (window.location.hash && window.location.hash.startsWith('#')) {
+    if (window.location.hash && window.location.hash.startsWith("#")) {
       const hashPart = window.location.hash.substring(1);
-      if (hashPart.startsWith('/')) {
+      if (hashPart.startsWith("/")) {
         path = hashPart;
       }
     }
@@ -155,7 +155,7 @@
   }
 
   function navigate(url) {
-    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    const cleanUrl = url.startsWith("/") ? url : `/${url}`;
     window.location.hash = `#${cleanUrl}`;
     parseRoute();
     initView();
@@ -231,19 +231,29 @@
     if (isSlideshowRoute) {
       if (msg.type === "photo:approved") {
         const photo = msg.payload;
-        if (!slideshowPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
+        if (
+          !slideshowPhotos.some(
+            (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+          )
+        ) {
           slideshowPhotos = [...slideshowPhotos, photo];
         }
       } else if (msg.type === "photo:bulk-approved") {
         const newlyApproved = msg.payload.photos || [];
-        const existingHashes = new Set(slideshowPhotos.map((p) => p.hash).filter(Boolean));
+        const existingHashes = new Set(
+          slideshowPhotos.map((p) => p.hash).filter(Boolean),
+        );
         const existingIds = new Set(slideshowPhotos.map((p) => p.id));
-        const toAdd = newlyApproved.filter((p) => !existingHashes.has(p.hash) && !existingIds.has(p.id));
+        const toAdd = newlyApproved.filter(
+          (p) => !existingHashes.has(p.hash) && !existingIds.has(p.id),
+        );
         slideshowPhotos = [...slideshowPhotos, ...toAdd];
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
         const removeHash = msg.payload.hash;
-        slideshowPhotos = slideshowPhotos.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
+        slideshowPhotos = slideshowPhotos.filter(
+          (p) => p.id !== removeId && (!removeHash || p.hash !== removeHash),
+        );
         if (currentSlideIndex >= slideshowPhotos.length) {
           currentSlideIndex = Math.max(0, slideshowPhotos.length - 1);
         }
@@ -253,21 +263,31 @@
         const photo = msg.payload;
         // 1. Update status in myUploads
         myUploads = myUploads.map((p) =>
-          (p.hash === photo.hash || p.id === photo.id) ? { ...p, status: "approved" } : p,
+          p.hash === photo.hash || p.id === photo.id
+            ? { ...p, status: "approved" }
+            : p,
         );
 
         // 2. Update status in Guest IndexedDB
         if (photo.hash) {
-          db.photos.where("hash").equals(photo.hash).modify({ status: "approved" }).catch(() => {});
+          db.photos
+            .where("hash")
+            .equals(photo.hash)
+            .modify({ status: "approved" })
+            .catch(() => {});
         }
 
         // 3. Find or construct the photo object with valid local Object URL
         const localMatch = myUploads.find((p) => p.hash === photo.hash);
-        let galleryItem = localMatch ? { ...localMatch, status: "approved" } : null;
+        let galleryItem = localMatch
+          ? { ...localMatch, status: "approved" }
+          : null;
 
         if (!galleryItem && photo.thumbDataUrl) {
           const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-          const origBlob = photo.originalDataUrl ? base64ToBlob(photo.originalDataUrl) : thumbBlob;
+          const origBlob = photo.originalDataUrl
+            ? base64ToBlob(photo.originalDataUrl)
+            : thumbBlob;
           const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
           const origUrl = origBlob ? URL.createObjectURL(origBlob) : "";
           galleryItem = {
@@ -283,35 +303,57 @@
         }
 
         // 4. Update liveGalleryPhotos reactively
-        if (!liveGalleryPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
+        if (
+          !liveGalleryPhotos.some(
+            (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+          )
+        ) {
           liveGalleryPhotos = [galleryItem, ...liveGalleryPhotos];
         } else {
           liveGalleryPhotos = liveGalleryPhotos.map((p) =>
-            (p.hash === photo.hash || p.id === photo.id) ? { ...p, ...galleryItem, status: "approved" } : p,
+            p.hash === photo.hash || p.id === photo.id
+              ? { ...p, ...galleryItem, status: "approved" }
+              : p,
           );
         }
       } else if (msg.type === "photo:bulk-approved") {
         const newApproved = msg.payload.photos || [];
-        const approvedHashes = new Set(newApproved.map((p) => p.hash).filter(Boolean));
+        const approvedHashes = new Set(
+          newApproved.map((p) => p.hash).filter(Boolean),
+        );
         const approvedIds = new Set(newApproved.map((p) => p.id));
 
         myUploads = myUploads.map((p) =>
-          (approvedHashes.has(p.hash) || approvedIds.has(p.id)) ? { ...p, status: "approved" } : p,
+          approvedHashes.has(p.hash) || approvedIds.has(p.id)
+            ? { ...p, status: "approved" }
+            : p,
         );
 
         for (const hash of approvedHashes) {
-          db.photos.where("hash").equals(hash).modify({ status: "approved" }).catch(() => {});
+          db.photos
+            .where("hash")
+            .equals(hash)
+            .modify({ status: "approved" })
+            .catch(() => {});
         }
 
-        const existingHashes = new Set(liveGalleryPhotos.map((p) => p.hash).filter(Boolean));
+        const existingHashes = new Set(
+          liveGalleryPhotos.map((p) => p.hash).filter(Boolean),
+        );
         const existingIds = new Set(liveGalleryPhotos.map((p) => p.id));
-        const toAdd = newApproved.filter((p) => !existingHashes.has(p.hash) && !existingIds.has(p.id));
+        const toAdd = newApproved.filter(
+          (p) => !existingHashes.has(p.hash) && !existingIds.has(p.id),
+        );
         liveGalleryPhotos = [...toAdd, ...liveGalleryPhotos];
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
         const removeHash = msg.payload.hash;
-        liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
-        myUploads = myUploads.filter((p) => p.id !== removeId && (!removeHash || p.hash !== removeHash));
+        liveGalleryPhotos = liveGalleryPhotos.filter(
+          (p) => p.id !== removeId && (!removeHash || p.hash !== removeHash),
+        );
+        myUploads = myUploads.filter(
+          (p) => p.id !== removeId && (!removeHash || p.hash !== removeHash),
+        );
         if (selectedPhotoIds.has(removeId)) {
           selectedPhotoIds.delete(removeId);
           selectedPhotoIds = new Set(selectedPhotoIds);
@@ -475,7 +517,6 @@
       console.error("Failed to load events", err);
     }
   }
-
 
   async function handleCreateEvent(e) {
     e.preventDefault();
@@ -705,25 +746,30 @@
   }
 
   // --- GOOGLE DRIVE BACKUP & ZIP EXPORTS (Client-Side Storage) ---
-  let gdriveClientId = $state(localStorage.getItem('caps_gdrive_client_id') || '');
+  let gdriveClientId = $state(
+    localStorage.getItem("caps_gdrive_client_id") || "",
+  );
   let isDriveConnected = $state(Boolean(gdrive.getStoredDriveToken()));
   let isSyncingDrive = $state(false);
-  let driveSyncProgress = $state('');
+  let driveSyncProgress = $state("");
 
   async function handleConnectGoogleDrive() {
     let clientId = gdriveClientId.trim();
     if (!clientId) {
-      const inputId = prompt("Enter your Google OAuth 2.0 Client ID (from Google Cloud Console):", "");
+      const inputId = prompt(
+        "Enter your Google OAuth 2.0 Client ID (from Google Cloud Console):",
+        "",
+      );
       if (!inputId || !inputId.trim()) return;
       clientId = inputId.trim();
       gdriveClientId = clientId;
-      localStorage.setItem('caps_gdrive_client_id', clientId);
+      localStorage.setItem("caps_gdrive_client_id", clientId);
     }
     try {
       await gdrive.requestGoogleDriveAuth(clientId);
       isDriveConnected = true;
       successMsg = "Connected to Google Drive!";
-      setTimeout(() => successMsg = "", 3000);
+      setTimeout(() => (successMsg = ""), 3000);
     } catch (err) {
       alert("Google Drive connection failed: " + err.message);
     }
@@ -733,7 +779,7 @@
     gdrive.disconnectGoogleDrive();
     isDriveConnected = false;
     successMsg = "Disconnected from Google Drive.";
-    setTimeout(() => successMsg = "", 3000);
+    setTimeout(() => (successMsg = ""), 3000);
   }
 
   async function handleSyncToGoogleDrive(slug) {
@@ -748,7 +794,7 @@
         driveSyncProgress = p.message || `Syncing ${p.percent || 0}%...`;
       });
       successMsg = `Successfully synced ${res.synced_count} photos to Google Drive!`;
-      setTimeout(() => successMsg = "", 5000);
+      setTimeout(() => (successMsg = ""), 5000);
     } catch (err) {
       alert("Google Drive sync failed: " + err.message);
     } finally {
@@ -765,7 +811,7 @@
         uploadProgressText = p.message || `Generating archive...`;
       });
       successMsg = "Full archive downloaded!";
-      setTimeout(() => successMsg = "", 4000);
+      setTimeout(() => (successMsg = ""), 4000);
     } catch (err) {
       alert("Failed to export archive: " + err.message);
     } finally {
@@ -870,7 +916,8 @@
         try {
           const session = await api.getGuestSession(slug, existingToken);
           if (session && session.guest) {
-            const eventObj = session.event || guestEventData || { guest_upload_limit: 20 };
+            const eventObj = session.event ||
+              guestEventData || { guest_upload_limit: 20 };
             const limit = Number(eventObj.guest_upload_limit) || 20;
             const used = Number(session.guest.upload_count) || 0;
             guestSession = {
@@ -917,13 +964,14 @@
     try {
       const res = await api.joinEvent(currentEventSlug, guestNameInput);
       setGuestToken(currentEventSlug, res.guest.token);
-      const eventObj = res.event || guestEventData || {
-        slug: currentEventSlug,
-        name: currentEventSlug.replace(/-/g, " ").toUpperCase(),
-        date: new Date().toISOString().split("T")[0],
-        guest_upload_limit: 20,
-        status: "active",
-      };
+      const eventObj = res.event ||
+        guestEventData || {
+          slug: currentEventSlug,
+          name: currentEventSlug.replace(/-/g, " ").toUpperCase(),
+          date: new Date().toISOString().split("T")[0],
+          guest_upload_limit: 20,
+          status: "active",
+        };
       guestEventData = eventObj;
       const limit = Number(eventObj.guest_upload_limit) || 20;
       const used = Number(res.guest?.upload_count) || 0;
@@ -1054,14 +1102,20 @@
 
           if (wsHandle) {
             // Stream full binary photo over WebRTC P2P mesh to host
-            if (res.processed && typeof wsHandle.streamPhotoToHost === "function") {
+            if (
+              res.processed &&
+              typeof wsHandle.streamPhotoToHost === "function"
+            ) {
               try {
                 await wsHandle.streamPhotoToHost(res.processed, {
                   name: guestSession.guest.name,
                   token: guestSession.guest.token,
                 });
               } catch (streamErr) {
-                console.error("Failed to stream binary photo over P2P mesh:", streamErr);
+                console.error(
+                  "Failed to stream binary photo over P2P mesh:",
+                  streamErr,
+                );
               }
             }
 
@@ -1229,6 +1283,18 @@
     }
   }
 
+  function exitSlideshow() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    const hostToken = localStorage.getItem('caps_host_token');
+    if (hostToken || authStatus.is_authenticated) {
+      navigate('/');
+    } else {
+      navigate(`/event/${currentEventSlug}`);
+    }
+  }
+
   function handleKeyDown(e) {
     if (!isSlideshowRoute) return;
     if (e.key === "ArrowRight") {
@@ -1241,7 +1307,7 @@
       toggleFullscreen();
     } else if (e.key === "Escape") {
       if (!document.fullscreenElement) {
-        navigate(`/event/${currentEventSlug}`);
+        exitSlideshow();
       }
     }
   }
@@ -1479,7 +1545,7 @@
             </button>
             <button
               class="slide-ctrl-btn"
-              onclick={() => navigate(`/event/${currentEventSlug}`)}
+              onclick={exitSlideshow}
               title="Exit (Esc)"
             >
               &times;
@@ -1505,11 +1571,16 @@
             </div>
           {/if}
           <div class="event-badge-top">Event Space</div>
-          <h2 class="event-hero-title">{guestEventData?.name || currentEventSlug.replace(/-/g, ' ').toUpperCase()}</h2>
+          <h2 class="event-hero-title">
+            {guestEventData?.name ||
+              currentEventSlug.replace(/-/g, " ").toUpperCase()}
+          </h2>
           {#if guestEventData?.tagline}
             <p class="event-hero-tagline">{guestEventData.tagline}</p>
           {/if}
-          <p class="event-hero-date">📅 {guestEventData?.date || new Date().toISOString().split('T')[0]}</p>
+          <p class="event-hero-date">
+            📅 {guestEventData?.date || new Date().toISOString().split("T")[0]}
+          </p>
 
           <div class="join-divider"></div>
 
@@ -1523,8 +1594,8 @@
               class="text-secondary"
               style="font-size: 0.9375rem; margin-bottom: 1.25rem;"
             >
-              Enter your name to share photos and view the live gallery.
-              No password required!
+              Enter your name to share photos and view the live gallery. No
+              password required!
             </p>
           {/if}
 
@@ -1561,7 +1632,9 @@
           </form>
 
           <div class="guest-join-footer">
-            <span>🔒 Photos shared in real-time over peer-to-peer connection</span>
+            <span
+              >🔒 Photos shared in real-time over peer-to-peer connection</span
+            >
           </div>
         </div>
 
@@ -1760,7 +1833,10 @@
                     disabled={isExportingArchive}
                     onclick={() => handleExportFullArchive(guestEventData.slug)}
                   >
-                    <span>💾</span> {isExportingArchive ? "Packaging ZIP..." : "Download All (.ZIP)"}
+                    <span>💾</span>
+                    {isExportingArchive
+                      ? "Packaging ZIP..."
+                      : "Download All (.ZIP)"}
                   </button>
                 {/if}
 
@@ -1804,7 +1880,7 @@
                   style="max-width: 420px; margin: 0.5rem auto 0 auto;"
                 >
                   Photos uploaded by guests will appear here as soon as approved
-                  by church staff.
+                  by staff.
                 </p>
                 {#if guestEventData.status === "active"}
                   <div style="margin-top: 1.25rem;">
@@ -1881,7 +1957,7 @@
         <h2>Welcome to Caps</h2>
         <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0;">
           Let's set up your host profile. You'll use this PIN to manage your
-          church events and photo moderation.
+          events and photo moderation.
         </p>
 
         {#if errorMsg}
@@ -1890,9 +1966,7 @@
 
         <form onsubmit={handleSetup} class="form-stack">
           <div>
-            <label class="form-label" for="hostName"
-              >Your Name / Church Role</label
-            >
+            <label class="form-label" for="hostName">Your Name / Role</label>
             <input
               id="hostName"
               type="text"
@@ -2137,7 +2211,10 @@
                 onclick={() => handleExportFullArchive(selectedEvent.slug)}
                 title="Full Archive: metadata.json + photos"
               >
-                <span>📦</span> {isExportingArchive ? "Packaging Archive..." : "Export Full Archive"}
+                <span>📦</span>
+                {isExportingArchive
+                  ? "Packaging Archive..."
+                  : "Export Full Archive"}
               </button>
               <button
                 class="btn-secondary"
@@ -2145,7 +2222,12 @@
                 onclick={() => handleSyncToGoogleDrive(selectedEvent.slug)}
                 title="1-Click Cloud Sync to Google Drive"
               >
-                <span>☁️</span> {isSyncingDrive ? (driveSyncProgress || "Syncing...") : (isDriveConnected ? "Sync to Google Drive" : "Connect Google Drive")}
+                <span>☁️</span>
+                {isSyncingDrive
+                  ? driveSyncProgress || "Syncing..."
+                  : isDriveConnected
+                    ? "Sync to Google Drive"
+                    : "Connect Google Drive"}
               </button>
               <button
                 class="btn-secondary"
@@ -2624,9 +2706,7 @@
             <div
               style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.75rem; max-width: 540px;"
             >
-              <h4 style="margin-bottom: 0.75rem;">
-                Custom Church / Event Logo
-              </h4>
+              <h4 style="margin-bottom: 0.75rem;">Custom Event Logo</h4>
               <div
                 style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.25rem;"
               >
@@ -2921,7 +3001,8 @@
               </button>
             {/if}
             <a
-              href={selectedPreviewPhoto.original_path || selectedPreviewPhoto.original_url}
+              href={selectedPreviewPhoto.original_path ||
+                selectedPreviewPhoto.original_url}
               download={selectedPreviewPhoto.filename}
               class="btn-primary btn-sm"
             >
@@ -3140,8 +3221,6 @@
       </div>
     </div>
   {/if}
-
-
 </div>
 
 <style>
