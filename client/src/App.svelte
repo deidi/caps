@@ -1240,7 +1240,7 @@
           guestSession.guest.upload_count = res.quota.used;
 
           if (wsHandle) {
-            // Stream full binary photo over WebRTC P2P mesh to host
+            // Stream full binary photo over realtime channel to host
             if (
               res.processed &&
               typeof wsHandle.streamPhotoToHost === "function"
@@ -1252,22 +1252,9 @@
                 });
               } catch (streamErr) {
                 console.error(
-                  "Failed to stream binary photo over P2P mesh:",
+                  "Failed to stream binary photo over realtime channel:",
                   streamErr,
                 );
-              }
-            }
-
-            if (res.photo) {
-              wsHandle.send({
-                type: "photo:uploaded",
-                payload: res.photo,
-              });
-              if (res.photo.status === "approved") {
-                wsHandle.send({
-                  type: "photo:approved",
-                  payload: res.photo,
-                });
               }
             }
           }
