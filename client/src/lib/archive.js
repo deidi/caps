@@ -1,6 +1,18 @@
 import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
 import { db } from './db.js';
+
+function saveAs(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
 
 /**
  * Export full event archive (.zip) containing:
