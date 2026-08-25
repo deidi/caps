@@ -810,8 +810,24 @@
       if (existingToken) {
         try {
           const session = await api.getGuestSession(slug, existingToken);
-          guestSession = session;
-          await loadMyUploads(slug, existingToken);
+          if (session && session.guest) {
+            const eventObj = session.event || guestEventData || { guest_upload_limit: 20 };
+            const limit = Number(eventObj.guest_upload_limit) || 20;
+            const used = Number(session.guest.upload_count) || 0;
+            guestSession = {
+              guest: session.guest,
+              event: eventObj,
+              quota: session.quota || {
+                used,
+                limit,
+                remaining: Math.max(0, limit - used),
+              },
+            };
+            await loadMyUploads(slug, existingToken);
+          } else {
+            setGuestToken(slug, "");
+            guestSession = null;
+          }
         } catch {
           setGuestToken(slug, "");
           guestSession = null;
@@ -820,6 +836,7 @@
         guestSession = null;
       }
     } catch (err) {
+      console.error("loadGuestExperience error:", err);
       errorMsg = err.message || "Event space not found";
     }
   }

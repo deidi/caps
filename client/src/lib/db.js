@@ -339,8 +339,25 @@ export async function joinEvent(slug, name) {
  * Get guest session
  */
 export async function getGuestSession(slug, guestToken) {
-  const event = await db.events.where('slug').equals(slug).first();
-  if (!event) throw new Error('Event not found');
+  let event = await db.events.where('slug').equals(slug).first();
+  if (!event) {
+    const formattedName = slug
+      .split('-')
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ');
+
+    event = {
+      slug,
+      name: formattedName,
+      date: new Date().toISOString().split('T')[0],
+      tagline: 'Memories Shared in Real-Time',
+      moderation_enabled: true,
+      guest_upload_limit: 20,
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    await db.events.put(event);
+  }
 
   if (!guestToken) {
     return { success: false, error: 'No guest token provided' };
@@ -351,10 +368,18 @@ export async function getGuestSession(slug, guestToken) {
     return { success: false, error: 'Guest session expired or not found' };
   }
 
+  const limit = Number(event.guest_upload_limit) || 20;
+  const used = Number(guest.upload_count) || 0;
+
   return {
     success: true,
     guest,
-    event
+    event,
+    quota: {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used)
+    }
   };
 }
 
