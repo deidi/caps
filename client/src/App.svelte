@@ -407,10 +407,36 @@
           liveGalleryPhotos.map((p) => p.hash).filter(Boolean),
         );
         const existingIds = new Set(liveGalleryPhotos.map((p) => p.id));
-        const toAdd = newApproved.filter(
-          (p) => !existingHashes.has(p.hash) && !existingIds.has(p.id),
-        );
-        liveGalleryPhotos = [...toAdd, ...liveGalleryPhotos];
+
+        for (const photo of newApproved) {
+          if (!existingHashes.has(photo.hash) && !existingIds.has(photo.id)) {
+            const localMatch = myUploads.find((p) => p.hash === photo.hash);
+            if (localMatch) {
+              liveGalleryPhotos = [
+                ...liveGalleryPhotos,
+                { ...localMatch, status: "approved" },
+              ];
+            } else if (photo.thumbDataUrl) {
+              const thumbBlob = base64ToBlob(photo.thumbDataUrl);
+              const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
+              liveGalleryPhotos = [
+                ...liveGalleryPhotos,
+                {
+                  ...photo,
+                  thumbnail_path: thumbUrl,
+                  thumb_url: thumbUrl,
+                  original_path: thumbUrl,
+                  original_url: thumbUrl,
+                },
+              ];
+            } else {
+              liveGalleryPhotos = [
+                ...liveGalleryPhotos,
+                { ...photo, status: "approved" },
+              ];
+            }
+          }
+        }
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload.id;
         const removeHash = msg.payload.hash;
@@ -775,10 +801,21 @@
     const ids = pendingPhotos.map((p) => p.id);
     try {
       await api.bulkPatchPhotoStatus(selectedEvent.slug, ids, "approved");
-      const newlyApproved = pendingPhotos.map((p) => ({
-        ...p,
-        status: "approved",
-      }));
+      const newlyApproved = [];
+      for (const p of pendingPhotos) {
+        let thumbDataUrl = p.thumbDataUrl;
+        if (!thumbDataUrl) {
+          const dbRecord = await db.photos.get(p.id);
+          if (dbRecord?.thumb_blob) {
+            thumbDataUrl = await blobToBase64(dbRecord.thumb_blob);
+          }
+        }
+        newlyApproved.push({
+          ...p,
+          status: "approved",
+          thumbDataUrl,
+        });
+      }
       approvedPhotos = [...newlyApproved, ...approvedPhotos];
       pendingPhotos = [];
       if (wsHandle && newlyApproved.length > 0) {

@@ -281,7 +281,7 @@ export function initP2PMesh(slug, options = {}) {
       }
 
       // Duplicate check in host's database
-      const existingPhoto = await db.photos.where({ event_slug: slug, hash }).first();
+      const existingPhoto = await db.photos.where('hash').equals(hash).first();
       if (existingPhoto) return;
 
       const originalBlob = base64ToBlob(originalDataUrl);
@@ -291,7 +291,7 @@ export function initP2PMesh(slug, options = {}) {
       // Find or associate guest
       let guest = null;
       if (guest_token) {
-        guest = await db.guests.where({ event_slug: slug, token: guest_token }).first();
+        guest = await db.guests.where('token').equals(guest_token).first();
         if (!guest) {
           const guestId = await db.guests.add({
             event_slug: slug,
@@ -333,6 +333,7 @@ export function initP2PMesh(slug, options = {}) {
       const formattedPhoto = {
         id,
         ...photoRecord,
+        thumbDataUrl,
         original_url: origUrl,
         thumb_url: thumbUrl,
         original_path: origUrl,
