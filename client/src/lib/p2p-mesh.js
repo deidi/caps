@@ -28,8 +28,17 @@ export function initP2PMesh(slug, options = {}) {
     };
   }
 
-  // WebRTC Trystero Room using public BitTorrent trackers
-  const room = joinRoom({ appId: APP_ID }, `caps-room-${slug}`);
+  // WebRTC Trystero Room using multiple high-availability Nostr relays
+  const room = joinRoom({
+    appId: APP_ID,
+    relayUrls: [
+      'wss://relay.damus.io',
+      'wss://relay.snort.social',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://nostr.mom'
+    ]
+  }, `caps-room-${slug}`);
 
   onStatusChange('connecting');
 

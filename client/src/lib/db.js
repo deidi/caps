@@ -472,6 +472,7 @@ export async function uploadPhoto(slug, file, guestToken) {
       original_blob: undefined,
       thumb_blob: undefined
     },
+    processed,
     quota
   };
 }

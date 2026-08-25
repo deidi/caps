@@ -993,16 +993,30 @@
           guestSession.quota = res.quota;
           guestSession.guest.upload_count = res.quota.used;
 
-          if (wsHandle && res.photo) {
-            wsHandle.send({
-              type: "photo:uploaded",
-              payload: res.photo,
-            });
-            if (res.photo.status === "approved") {
+          if (wsHandle) {
+            // Stream full binary photo over WebRTC P2P mesh to host
+            if (res.processed && typeof wsHandle.streamPhotoToHost === "function") {
+              try {
+                await wsHandle.streamPhotoToHost(res.processed, {
+                  name: guestSession.guest.name,
+                  token: guestSession.guest.token,
+                });
+              } catch (streamErr) {
+                console.error("Failed to stream binary photo over P2P mesh:", streamErr);
+              }
+            }
+
+            if (res.photo) {
               wsHandle.send({
-                type: "photo:approved",
+                type: "photo:uploaded",
                 payload: res.photo,
               });
+              if (res.photo.status === "approved") {
+                wsHandle.send({
+                  type: "photo:approved",
+                  payload: res.photo,
+                });
+              }
             }
           }
         } catch (err) {
