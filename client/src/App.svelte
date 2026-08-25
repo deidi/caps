@@ -858,7 +858,14 @@
     try {
       const res = await api.joinEvent(currentEventSlug, guestNameInput);
       setGuestToken(currentEventSlug, res.guest.token);
-      const eventObj = res.event || guestEventData || { guest_upload_limit: 20 };
+      const eventObj = res.event || guestEventData || {
+        slug: currentEventSlug,
+        name: currentEventSlug.replace(/-/g, " ").toUpperCase(),
+        date: new Date().toISOString().split("T")[0],
+        guest_upload_limit: 20,
+        status: "active",
+      };
+      guestEventData = eventObj;
       const limit = Number(eventObj.guest_upload_limit) || 20;
       const used = Number(res.guest?.upload_count) || 0;
       guestSession = {
@@ -873,6 +880,7 @@
       guestNameInput = "";
       await loadMyUploads(currentEventSlug, res.guest.token);
     } catch (err) {
+      console.error("handleGuestJoin error:", err);
       errorMsg = err.message || "Failed to join event";
     } finally {
       isSubmitting = false;
@@ -1411,22 +1419,10 @@
       <!-- GUEST EXPERIENCE VIEW                     -->
       <!-- ========================================== -->
     {:else if isGuestRoute}
-      {#if errorMsg && !guestEventData}
-        <div class="card auth-card">
-          <div class="auth-icon">⚠️</div>
-          <h2>Event Not Found</h2>
-          <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0;">
-            {errorMsg}
-          </p>
-          <button class="btn-primary" onclick={() => navigate("/")}
-            >Go to Home</button
-          >
-        </div>
-
+      {#if !guestSession}
         <!-- 1. GUEST JOIN SCREEN -->
-      {:else if !guestSession && guestEventData}
         <div class="card auth-card guest-join-card">
-          {#if guestEventData.logo}
+          {#if guestEventData?.logo}
             <div style="margin-bottom: 1rem;">
               <img
                 src={guestEventData.logo}
@@ -1435,16 +1431,16 @@
               />
             </div>
           {/if}
-          <div class="event-badge-top">Church Event Space</div>
-          <h2 class="event-hero-title">{guestEventData.name}</h2>
-          {#if guestEventData.tagline}
+          <div class="event-badge-top">Event Space</div>
+          <h2 class="event-hero-title">{guestEventData?.name || currentEventSlug.replace(/-/g, ' ').toUpperCase()}</h2>
+          {#if guestEventData?.tagline}
             <p class="event-hero-tagline">{guestEventData.tagline}</p>
           {/if}
-          <p class="event-hero-date">📅 {guestEventData.date}</p>
+          <p class="event-hero-date">📅 {guestEventData?.date || new Date().toISOString().split('T')[0]}</p>
 
           <div class="join-divider"></div>
 
-          {#if guestEventData.status === "archived"}
+          {#if guestEventData?.status === "archived"}
             <div class="alert-archived-banner">
               🔒 <strong>This event has concluded.</strong> You can browse and download
               all shared memories below.
@@ -1454,7 +1450,7 @@
               class="text-secondary"
               style="font-size: 0.9375rem; margin-bottom: 1.25rem;"
             >
-              Enter your name to share photos and view the live church gallery.
+              Enter your name to share photos and view the live gallery.
               No password required!
             </p>
           {/if}
@@ -1485,19 +1481,19 @@
             >
               {isSubmitting
                 ? "Joining..."
-                : guestEventData.status === "archived"
+                : guestEventData?.status === "archived"
                   ? "Enter Event Gallery →"
                   : "Join & Share Photos →"}
             </button>
           </form>
 
           <div class="guest-join-footer">
-            <span>🔒 Photos stored privately on church local server</span>
+            <span>🔒 Photos shared in real-time over peer-to-peer connection</span>
           </div>
         </div>
 
         <!-- 2. GUEST EVENT SPACE (Active Session) -->
-      {:else if guestSession && guestEventData}
+      {:else}
         <div class="guest-space-container">
           <!-- Hidden File Inputs -->
           <input
