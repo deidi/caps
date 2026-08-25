@@ -264,13 +264,20 @@
         myUploads = myUploads.filter((p) => !removedIds.has(p.id));
       }
     } else if (selectedEvent) {
-      if (msg.type === "photo:new-pending") {
+      if (msg.type === "photo:new-pending" || msg.type === "photo:uploaded") {
         const photo = msg.payload.photo || msg.payload;
-        if (!pendingPhotos.some((p) => p.id === photo.id)) {
-          pendingPhotos = [photo, ...pendingPhotos];
+        if (photo.status === "pending") {
+          if (!pendingPhotos.some((p) => p.id === photo.id)) {
+            pendingPhotos = [photo, ...pendingPhotos];
+          }
+        } else if (photo.status === "approved") {
+          pendingPhotos = pendingPhotos.filter((p) => p.id !== photo.id);
+          if (!approvedPhotos.some((p) => p.id === photo.id)) {
+            approvedPhotos = [photo, ...approvedPhotos];
+          }
         }
       } else if (msg.type === "photo:approved") {
-        const photo = msg.payload;
+        const photo = msg.payload.photo || msg.payload;
         pendingPhotos = pendingPhotos.filter((p) => p.id !== photo.id);
         if (!approvedPhotos.some((p) => p.id === photo.id)) {
           approvedPhotos = [photo, ...approvedPhotos];
@@ -839,6 +846,19 @@
           successCount++;
           guestSession.quota = res.quota;
           guestSession.guest.upload_count = res.quota.used;
+
+          if (wsHandle && res.photo) {
+            wsHandle.send({
+              type: "photo:uploaded",
+              payload: res.photo,
+            });
+            if (res.photo.status === "approved") {
+              wsHandle.send({
+                type: "photo:approved",
+                payload: res.photo,
+              });
+            }
+          }
         } catch (err) {
           if (
             err.message &&

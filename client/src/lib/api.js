@@ -113,20 +113,38 @@ export const api = {
   }
 };
 
+import { initP2PMesh } from './p2p-mesh.js';
+
 /**
- * P2P WebRTC / Realtime connection mock handle for Slice 1
- * (Will connect to Trystero WebRTC mesh in Slice 3)
+ * P2P WebRTC / Realtime connection handle powered by Trystero
  */
-export function createWebSocketConnection(onMessage, onStatusChange, slug = null) {
-  if (onStatusChange) onStatusChange('connected');
-  
+export function createWebSocketConnection(slugOrMessage, optionsOrStatus, maybeSlug) {
+  let slug = '';
+  let options = {};
+
+  if (typeof slugOrMessage === 'string') {
+    slug = slugOrMessage;
+    options = optionsOrStatus || {};
+  } else if (typeof maybeSlug === 'string') {
+    slug = maybeSlug;
+    options = {
+      onMessage: slugOrMessage,
+      onStatusChange: optionsOrStatus
+    };
+  }
+
+  if (!slug) {
+    return {
+      send: () => {},
+      disconnect: () => {},
+      close: () => {}
+    };
+  }
+
+  const mesh = initP2PMesh(slug, options);
   return {
-    send: (msg) => {
-      // Local broadcast placeholder
-    },
-    close: () => {
-      if (onStatusChange) onStatusChange('disconnected');
-    }
+    ...mesh,
+    close: () => mesh?.disconnect()
   };
 }
 
