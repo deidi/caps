@@ -41,6 +41,8 @@
   let currentPath = $state(window.location.pathname);
   let isGuestRoute = $state(false);
   let isSlideshowRoute = $state(false);
+  let isPrivacyRoute = $state(false);
+  let isTermsRoute = $state(false);
   let currentEventSlug = $state("");
 
   // Host setup & unlock form state
@@ -130,6 +132,27 @@
       }
     }
     currentPath = path;
+
+    if (path === "/privacy" || path.startsWith("/privacy")) {
+      isPrivacyRoute = true;
+      isTermsRoute = false;
+      isGuestRoute = false;
+      isSlideshowRoute = false;
+      currentEventSlug = "";
+      return;
+    }
+
+    if (path === "/terms" || path.startsWith("/terms")) {
+      isTermsRoute = true;
+      isPrivacyRoute = false;
+      isGuestRoute = false;
+      isSlideshowRoute = false;
+      currentEventSlug = "";
+      return;
+    }
+
+    isPrivacyRoute = false;
+    isTermsRoute = false;
 
     const slideshowMatch = path.match(
       /^\/event\/([a-zA-Z0-9_-]+)\/(slideshow|tv)/,
@@ -1620,6 +1643,57 @@
       <div class="loading-state">
         <div class="spinner"></div>
         <p>Connecting to EventCaps...</p>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- PRIVACY POLICY VIEW                        -->
+      <!-- ========================================== -->
+    {:else if isPrivacyRoute}
+      <div class="card policy-card text-left" style="max-width: 780px; margin: 2rem auto; padding: 2.5rem; line-height: 1.7;">
+        <button class="btn-secondary btn-sm" style="margin-bottom: 1.5rem;" onclick={() => navigate("/")}>
+          ← Back to EventCaps
+        </button>
+        <h2 style="font-size: 1.75rem; margin-bottom: 0.25rem;">Privacy Policy</h2>
+        <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 2rem;">Last Updated: August 2026</p>
+
+        <h3 style="margin-top: 1.5rem;">1. Overview</h3>
+        <p class="text-secondary">EventCaps (<code>https://deidi.github.io/caps/</code>) is a server-less event photo sharing hub. We are committed to protecting your privacy and providing transparent information regarding how data is handled.</p>
+
+        <h3 style="margin-top: 1.5rem;">2. Google Drive Permissions & Data Use</h3>
+        <p class="text-secondary">EventCaps connects to your Google Account using the restricted <code>https://www.googleapis.com/auth/drive.file</code> OAuth scope. This permission is strictly used to:</p>
+        <ul style="margin: 0.75rem 0 1.25rem 1.5rem; color: var(--color-text-secondary);">
+          <li>Create a dedicated folder named <code>/EventCaps Events</code> in your personal Google Drive.</li>
+          <li>Upload event photos taken and submitted by attendees during your event.</li>
+          <li>Store a lightweight event manifest snapshot (<code>event_manifest.json</code>) for event metadata.</li>
+        </ul>
+        <p class="text-secondary"><strong>Strict Isolation:</strong> EventCaps does not access, view, modify, or delete any other files, documents, or folders in your Google Drive.</p>
+
+        <h3 style="margin-top: 1.5rem;">3. Client-Side Processing</h3>
+        <p class="text-secondary">All photo compression, thumbnail generation, duplicate detection, and metadata formatting are executed entirely within your web browser using HTML5 Canvas. No photos or Google access tokens are transmitted to or stored on third-party backend servers.</p>
+
+        <h3 style="margin-top: 1.5rem;">4. Revoking Access</h3>
+        <p class="text-secondary">You can disconnect Google Drive at any time from within the EventCaps dashboard, or revoke access from your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" style="color: var(--color-primary);">Google Account Security Settings</a>.</p>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TERMS OF SERVICE VIEW                      -->
+      <!-- ========================================== -->
+    {:else if isTermsRoute}
+      <div class="card policy-card text-left" style="max-width: 780px; margin: 2rem auto; padding: 2.5rem; line-height: 1.7;">
+        <button class="btn-secondary btn-sm" style="margin-bottom: 1.5rem;" onclick={() => navigate("/")}>
+          ← Back to EventCaps
+        </button>
+        <h2 style="font-size: 1.75rem; margin-bottom: 0.25rem;">Terms of Service</h2>
+        <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 2rem;">Last Updated: August 2026</p>
+
+        <h3 style="margin-top: 1.5rem;">1. Acceptance of Terms</h3>
+        <p class="text-secondary">By accessing or using EventCaps, you agree to comply with and be bound by these Terms of Service.</p>
+
+        <h3 style="margin-top: 1.5rem;">2. User-Generated Content</h3>
+        <p class="text-secondary">Attendees retain rights to photos they capture and upload. Users agree not to upload harmful, offensive, or infringing material. Event hosts retain full moderation rights to approve, reject, or remove photos from their event space.</p>
+
+        <h3 style="margin-top: 1.5rem;">3. Disclaimer & Limitation of Liability</h3>
+        <p class="text-secondary">EventCaps is provided on an "as is" and "as available" basis without warranties of any kind. EventCaps is not liable for data loss or service interruptions resulting from third-party cloud services.</p>
       </div>
 
       <!-- ========================================== -->
