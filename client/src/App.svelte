@@ -2259,56 +2259,80 @@
         <button class="btn-primary" onclick={checkAuth}>Retry</button>
       </div>
 
-      <!-- 1. FIRST-TIME SETUP -->
+      <!-- 1. FIRST-TIME SETUP / PUBLIC LANDING -->
     {:else if !authStatus.initialized}
-      <div class="card auth-card">
-        <div class="auth-icon">🚀</div>
-        <h2>Welcome to EventCaps</h2>
-        <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0;">
-          Let's set up your host profile. You'll use this PIN to manage your
-          events and photo moderation.
-        </p>
-
-        {#if errorMsg}
-          <div class="alert-error">{errorMsg}</div>
-        {/if}
-
-        <form onsubmit={handleSetup} class="form-stack">
-          <div>
-            <label class="form-label" for="hostName">Your Name / Role</label>
-            <input
-              id="hostName"
-              type="text"
-              class="input-field"
-              placeholder="e.g. Pastor John / Media Team"
-              bind:value={setupName}
-              required
-            />
+      <div class="landing-container" style="max-width: 900px; margin: 1.5rem auto; text-align: center;">
+        <div class="hero-section" style="margin-bottom: 2rem;">
+          <h1 style="font-size: 2.25rem; font-weight: 800; margin-bottom: 0.5rem;">📸 EventCaps</h1>
+          <p class="text-secondary" style="font-size: 1.125rem; max-width: 620px; margin: 0 auto 1.5rem auto;">
+            A 100% server-less, cloud-first event photo sharing hub. Capture, moderate, and stream live event memories with Google Drive cloud hosting.
+          </p>
+          <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2rem;">
+            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem; text-align: left; max-width: 270px; flex: 1 1 240px;">
+              <div style="font-size: 1.75rem; margin-bottom: 0.35rem;">☁️</div>
+              <strong style="font-size: 1rem;">100+ Live Uploads</strong>
+              <p class="text-secondary" style="font-size: 0.8125rem; margin-top: 0.35rem; line-height: 1.4;">Direct Google Drive cloud storage and high-speed Google CDN photo delivery.</p>
+            </div>
+            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem; text-align: left; max-width: 270px; flex: 1 1 240px;">
+              <div style="font-size: 1.75rem; margin-bottom: 0.35rem;">📺</div>
+              <strong style="font-size: 1rem;">Live Slideshow</strong>
+              <p class="text-secondary" style="font-size: 0.8125rem; margin-top: 0.35rem; line-height: 1.4;">Real-time TV and projector presentation mode with live auto-rotating slides.</p>
+            </div>
+            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem; text-align: left; max-width: 270px; flex: 1 1 240px;">
+              <div style="font-size: 1.75rem; margin-bottom: 0.35rem;">🔒</div>
+              <strong style="font-size: 1rem;">Host Moderation</strong>
+              <p class="text-secondary" style="font-size: 0.8125rem; margin-top: 0.35rem; line-height: 1.4;">Client-side approval queue to review and manage all incoming photos.</p>
+            </div>
           </div>
+        </div>
 
-          <div>
-            <label class="form-label" for="hostPin">Admin PIN (4+ digits)</label
+        <div class="card auth-card" style="margin: 0 auto; text-align: left;">
+          <div class="auth-icon" style="text-align: center;">🚀</div>
+          <h2 style="text-align: center;">Host Setup</h2>
+          <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0; text-align: center;">
+            Set up your host profile to create events, customize branding, and moderate photos.
+          </p>
+
+          {#if errorMsg}
+            <div class="alert-error">{errorMsg}</div>
+          {/if}
+
+          <form onsubmit={handleSetup} class="form-stack">
+            <div>
+              <label class="form-label" for="hostName">Your Name / Role</label>
+              <input
+                id="hostName"
+                type="text"
+                class="input-field"
+                placeholder="e.g. Pastor John / Media Team"
+                bind:value={setupName}
+                required
+              />
+            </div>
+
+            <div>
+              <label class="form-label" for="hostPin">Admin PIN (4+ digits)</label>
+              <input
+                id="hostPin"
+                type="password"
+                class="input-field"
+                placeholder="••••"
+                maxlength="8"
+                bind:value={setupPin}
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              class="btn-primary"
+              style="width: 100%; margin-top: 0.5rem;"
+              disabled={isSubmitting}
             >
-            <input
-              id="hostPin"
-              type="password"
-              class="input-field"
-              placeholder="••••"
-              maxlength="8"
-              bind:value={setupPin}
-              required
-            />
-          </div>
-
-          <button
-            type="submit"
-            class="btn-primary"
-            style="width: 100%; margin-top: 0.5rem;"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "Setting up..." : "Start EventCaps"}
-          </button>
-        </form>
+              {isSubmitting ? "Setting up..." : "Start EventCaps"}
+            </button>
+          </form>
+        </div>
       </div>
 
       <!-- 2. UNLOCK PIN SCREEN -->
