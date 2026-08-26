@@ -584,8 +584,8 @@ export async function getPhotos(slug, options = {}) {
   photos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
   const result = photos.map(p => {
-    const origUrl = getCachedObjectURL(p.original_blob, `orig_${p.id}`);
-    const thumbUrl = getCachedObjectURL(p.thumb_blob, `thumb_${p.id}`);
+    const origUrl = p.original_blob ? getCachedObjectURL(p.original_blob, `orig_${p.id}`) : (p.drive_orig_url || '');
+    const thumbUrl = p.thumb_blob ? getCachedObjectURL(p.thumb_blob, `thumb_${p.id}`) : (p.drive_thumb_url || origUrl);
     return {
       id: p.id,
       event_slug: p.event_slug,
@@ -597,6 +597,10 @@ export async function getPhotos(slug, options = {}) {
       width: p.width,
       height: p.height,
       size: p.size,
+      drive_orig_id: p.drive_orig_id,
+      drive_thumb_id: p.drive_thumb_id,
+      drive_orig_url: p.drive_orig_url,
+      drive_thumb_url: p.drive_thumb_url,
       created_at: p.created_at,
       original_url: origUrl,
       thumb_url: thumbUrl,

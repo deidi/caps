@@ -856,6 +856,7 @@
   let isDriveConnected = $state(Boolean(gdrive.getStoredDriveToken()));
   let isSyncingDrive = $state(false);
   let driveSyncProgress = $state("");
+  let driveEventFolderUrl = $state("");
 
   async function handleConnectGoogleDrive() {
     let clientId = gdriveClientId.trim();
@@ -872,8 +873,16 @@
     try {
       await gdrive.requestGoogleDriveAuth(clientId);
       isDriveConnected = true;
-      successMsg = "Connected to Google Drive!";
-      setTimeout(() => (successMsg = ""), 3000);
+      if (selectedEvent) {
+        try {
+          const hierarchy = await gdrive.setupEventDriveHierarchy(selectedEvent.slug, selectedEvent.name);
+          driveEventFolderUrl = hierarchy.folderUrl;
+        } catch (e) {
+          console.warn("Could not pre-initialize Drive hierarchy:", e);
+        }
+      }
+      successMsg = "Connected to Google Drive! Direct 100+ guest uploads active.";
+      setTimeout(() => (successMsg = ""), 4000);
     } catch (err) {
       alert("Google Drive connection failed: " + err.message);
     }
@@ -882,6 +891,7 @@
   function handleDisconnectGoogleDrive() {
     gdrive.disconnectGoogleDrive();
     isDriveConnected = false;
+    driveEventFolderUrl = "";
     successMsg = "Disconnected from Google Drive.";
     setTimeout(() => (successMsg = ""), 3000);
   }
@@ -897,6 +907,9 @@
       const res = await gdrive.syncEventToGoogleDrive(slug, (p) => {
         driveSyncProgress = p.message || `Syncing ${p.percent || 0}%...`;
       });
+      if (res.folder_url) {
+        driveEventFolderUrl = res.folder_url;
+      }
       successMsg = `Successfully synced ${res.synced_count} photos to Google Drive!`;
       setTimeout(() => (successMsg = ""), 5000);
     } catch (err) {
@@ -1239,23 +1252,51 @@
           guestSession.quota = res.quota;
           guestSession.guest.upload_count = res.quota.used;
 
-          if (wsHandle) {
-            // Stream full binary photo over realtime channel to host
-            if (
-              res.processed &&
-              typeof wsHandle.streamPhotoToHost === "function"
-            ) {
-              try {
-                await wsHandle.streamPhotoToHost(res.processed, {
+          if (wsHandle && res.processed) {
+            try {
+              const session = await wsHandle.requestGDriveUploadSession(
+                {
+                  filename: res.processed.filename,
+                  mimeType: res.processed.mimeType,
+                  origSize: res.processed.originalBlob.size,
+                  thumbSize: res.processed.thumbBlob.size,
+                  hash: res.processed.hash
+                },
+                {
                   name: guestSession.guest.name,
-                  token: guestSession.guest.token,
+                  token: guestSession.guest.token
+                }
+              );
+
+              if (session && session.origUploadUri && session.thumbUploadUri) {
+                const [origResult, thumbResult] = await Promise.all([
+                  gdrive.uploadBlobToResumableSession(
+                    session.origUploadUri,
+                    res.processed.originalBlob,
+                    res.processed.mimeType
+                  ),
+                  gdrive.uploadBlobToResumableSession(
+                    session.thumbUploadUri,
+                    res.processed.thumbBlob,
+                    'image/jpeg'
+                  )
+                ]);
+
+                wsHandle.notifyGDrivePhotoUploaded({
+                  driveOrigId: origResult?.id || '',
+                  driveThumbId: thumbResult?.id || '',
+                  filename: res.processed.filename,
+                  hash: res.processed.hash,
+                  width: res.processed.width,
+                  height: res.processed.height,
+                  size: res.processed.size,
+                  mimeType: res.processed.mimeType,
+                  guest_name: guestSession.guest.name,
+                  guest_token: guestSession.guest.token
                 });
-              } catch (streamErr) {
-                console.error(
-                  "Failed to stream binary photo over realtime channel:",
-                  streamErr,
-                );
               }
+            } catch (cloudErr) {
+              console.warn('Direct Google Drive upload notification failed:', cloudErr);
             }
           }
         } catch (err) {
@@ -2346,15 +2387,27 @@
                 class="btn-secondary"
                 disabled={isSyncingDrive}
                 onclick={() => handleSyncToGoogleDrive(selectedEvent.slug)}
-                title="1-Click Cloud Sync to Google Drive"
+                title="Direct Cloud Sync to Google Drive (100+ Mode)"
               >
                 <span>☁️</span>
                 {isSyncingDrive
                   ? driveSyncProgress || "Syncing..."
                   : isDriveConnected
                     ? "Sync to Google Drive"
-                    : "Connect Google Drive"}
+                    : "Connect Google Drive (100+ Mode)"}
               </button>
+              {#if isDriveConnected && driveEventFolderUrl}
+                <a
+                  href={driveEventFolderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn-secondary"
+                  style="text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem;"
+                  title="Open Event Album in Google Drive"
+                >
+                  <span>📁</span> Open Drive ↗
+                </a>
+              {/if}
               <button
                 class="btn-secondary"
                 onclick={() => openQrModal(selectedEvent, false)}

@@ -3,8 +3,10 @@ import { db } from './db.js';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+const DRIVE_RESUMABLE_INIT_URL = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable';
 
 let tokenClient = null;
+const folderCache = new Map();
 
 export function getStoredDriveToken() {
   const token = localStorage.getItem('caps_gdrive_token');
@@ -28,9 +30,12 @@ export function setStoredDriveToken(token, expiresIn = 3600) {
 export function disconnectGoogleDrive() {
   const token = getStoredDriveToken();
   if (token && typeof google !== 'undefined' && google?.accounts?.oauth2) {
-    google.accounts.oauth2.revoke(token, () => {});
+    try {
+      google.accounts.oauth2.revoke(token, () => {});
+    } catch (_) {}
   }
   setStoredDriveToken(null);
+  folderCache.clear();
 }
 
 /**
@@ -73,6 +78,11 @@ export async function findOrCreateFolder(folderName, parentFolderId = 'root') {
   const token = getStoredDriveToken();
   if (!token) throw new Error('Not authenticated with Google Drive');
 
+  const cacheKey = `${parentFolderId}::${folderName}`;
+  if (folderCache.has(cacheKey)) {
+    return folderCache.get(cacheKey);
+  }
+
   // Search if folder already exists
   const query = `name = '${folderName.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchUrl = `${DRIVE_API_URL}?q=${encodeURIComponent(query)}&fields=files(id,name)`;
@@ -83,7 +93,9 @@ export async function findOrCreateFolder(folderName, parentFolderId = 'root') {
   const searchData = await searchRes.json();
 
   if (searchData.files && searchData.files.length > 0) {
-    return searchData.files[0].id;
+    const id = searchData.files[0].id;
+    folderCache.set(cacheKey, id);
+    return id;
   }
 
   // Create folder
@@ -105,11 +117,154 @@ export async function findOrCreateFolder(folderName, parentFolderId = 'root') {
     throw new Error(createData.error?.message || 'Failed to create Drive folder');
   }
 
+  folderCache.set(cacheKey, createData.id);
   return createData.id;
 }
 
 /**
- * Upload a Blob as a file into a Google Drive folder
+ * Make a Google Drive folder publicly viewable (anyone with link can view)
+ */
+export async function makeFolderPublicView(folderId) {
+  const token = getStoredDriveToken();
+  if (!token) return;
+
+  try {
+    await fetch(`${DRIVE_API_URL}/${folderId}/permissions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        role: 'reader',
+        type: 'anyone',
+        allowFileDiscovery: false
+      })
+    });
+  } catch (err) {
+    console.warn('Could not set public permission on Drive folder:', err);
+  }
+}
+
+/**
+ * Setup complete hierarchy for an event in Google Drive
+ */
+export async function setupEventDriveHierarchy(slug, eventName) {
+  const token = getStoredDriveToken();
+  if (!token) throw new Error('Not authenticated with Google Drive');
+
+  const rootFolderId = await findOrCreateFolder('Caps Events', 'root');
+  const eventFolderId = await findOrCreateFolder(eventName || slug, rootFolderId);
+  const originalsFolderId = await findOrCreateFolder('originals', eventFolderId);
+  const thumbnailsFolderId = await findOrCreateFolder('thumbnails', eventFolderId);
+
+  // Enable public read access so guests / slideshows can stream from Google CDN
+  await makeFolderPublicView(eventFolderId);
+  await makeFolderPublicView(originalsFolderId);
+  await makeFolderPublicView(thumbnailsFolderId);
+
+  return {
+    rootFolderId,
+    eventFolderId,
+    originalsFolderId,
+    thumbnailsFolderId,
+    folderUrl: `https://drive.google.com/drive/folders/${eventFolderId}`
+  };
+}
+
+/**
+ * Create a Google Drive Resumable Upload Session URI for guest direct upload
+ */
+export async function createResumableUploadSession({ folderId, fileName, mimeType = 'image/jpeg', fileSize }) {
+  const token = getStoredDriveToken();
+  if (!token) throw new Error('Not authenticated with Google Drive');
+
+  const metadata = {
+    name: fileName,
+    parents: [folderId]
+  };
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Upload-Content-Type': mimeType
+  };
+
+  if (fileSize) {
+    headers['X-Upload-Content-Length'] = String(fileSize);
+  }
+
+  const res = await fetch(DRIVE_RESUMABLE_INIT_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(metadata)
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || 'Failed to initialize Google Drive upload session');
+  }
+
+  const uploadUri = res.headers.get('Location');
+  if (!uploadUri) {
+    throw new Error('Google Drive did not return a session upload URI');
+  }
+
+  return uploadUri;
+}
+
+/**
+ * Upload a binary Blob directly to a Google Drive Resumable Session URI
+ * (Can be called by guest phone directly without OAuth headers)
+ */
+export function uploadBlobToResumableSession(uploadUri, blob, mimeType = 'image/jpeg', onProgress = () => {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUri, true);
+    xhr.setRequestHeader('Content-Type', mimeType);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        onProgress({ loaded: e.loaded, total: e.total, percent });
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const result = JSON.parse(xhr.responseText);
+          resolve(result);
+        } catch (err) {
+          resolve({ id: xhr.responseText });
+        }
+      } else {
+        reject(new Error(`Drive upload failed (status ${xhr.status}): ${xhr.statusText}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during Google Drive direct upload'));
+    xhr.ontimeout = () => reject(new Error('Google Drive upload timed out'));
+
+    xhr.send(blob);
+  });
+}
+
+/**
+ * Helper to get CDN direct image URLs from Google Drive File ID
+ */
+export function getDriveCDNUrl(fileId, size = 1600) {
+  if (!fileId) return '';
+  return `https://lh3.googleusercontent.com/d/${fileId}=s${size}`;
+}
+
+export function getDriveThumbnailUrl(fileId, size = 400) {
+  if (!fileId) return '';
+  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size}`;
+}
+
+/**
+ * Upload a Blob as a file into a Google Drive folder (Host Direct)
  */
 export async function uploadBlobToDrive(folderId, fileName, blob, mimeType = 'image/jpeg') {
   const token = getStoredDriveToken();
@@ -141,7 +296,7 @@ export async function uploadBlobToDrive(folderId, fileName, blob, mimeType = 'im
 }
 
 /**
- * Sync an event's photos and database manifest to Google Drive
+ * Sync an entire event's photos and database manifest to Google Drive
  */
 export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
   const token = getStoredDriveToken();
@@ -152,17 +307,9 @@ export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
 
   onProgress({ stage: 'init', message: 'Connecting to Google Drive...' });
 
-  // 1. Ensure Root Folder: /Caps Events
-  const rootFolderId = await findOrCreateFolder('Caps Events', 'root');
+  const { eventFolderId, originalsFolderId, thumbnailsFolderId } = await setupEventDriveHierarchy(slug, event.name);
 
-  // 2. Ensure Event Folder: /Caps Events/<Event Name>
-  const eventFolderId = await findOrCreateFolder(event.name, rootFolderId);
-
-  // 3. Ensure Subfolders: /originals and /thumbnails
-  const originalsFolderId = await findOrCreateFolder('originals', eventFolderId);
-  const thumbnailsFolderId = await findOrCreateFolder('thumbnails', eventFolderId);
-
-  // 4. Fetch photos to sync
+  // Fetch photos to sync
   const photos = await db.photos.where('event_slug').equals(slug).toArray();
   const approvedPhotos = photos.filter(p => p.status === 'approved');
 
@@ -180,11 +327,25 @@ export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
     });
 
     try {
-      if (photo.original_blob) {
-        await uploadBlobToDrive(originalsFolderId, photo.filename, photo.original_blob, photo.mime_type || 'image/jpeg');
+      let driveOrigId = photo.drive_orig_id;
+      let driveThumbId = photo.drive_thumb_id;
+
+      if (!driveOrigId && photo.original_blob) {
+        const up = await uploadBlobToDrive(originalsFolderId, photo.filename, photo.original_blob, photo.mime_type || 'image/jpeg');
+        driveOrigId = up.id;
       }
-      if (photo.thumb_blob) {
-        await uploadBlobToDrive(thumbnailsFolderId, `thumb_${photo.filename}`, photo.thumb_blob, 'image/jpeg');
+      if (!driveThumbId && photo.thumb_blob) {
+        const upThumb = await uploadBlobToDrive(thumbnailsFolderId, `thumb_${photo.filename}`, photo.thumb_blob, 'image/jpeg');
+        driveThumbId = upThumb.id;
+      }
+
+      if (driveOrigId || driveThumbId) {
+        await db.photos.update(photo.id, {
+          drive_orig_id: driveOrigId,
+          drive_thumb_id: driveThumbId,
+          drive_orig_url: driveOrigId ? getDriveCDNUrl(driveOrigId, 2048) : photo.drive_orig_url,
+          drive_thumb_url: driveThumbId ? getDriveThumbnailUrl(driveThumbId, 400) : photo.drive_thumb_url
+        });
       }
 
       await db.sync_logs.add({
@@ -206,7 +367,7 @@ export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
     }
   }
 
-  // 5. Upload event_manifest.json snapshot
+  // Upload event_manifest.json snapshot
   onProgress({
     stage: 'manifest',
     current: total,
@@ -231,6 +392,10 @@ export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
       height: p.height,
       size: p.size,
       status: p.status,
+      drive_orig_id: p.drive_orig_id,
+      drive_thumb_id: p.drive_thumb_id,
+      drive_orig_url: p.drive_orig_url,
+      drive_thumb_url: p.drive_thumb_url,
       created_at: p.created_at
     }))
   };
@@ -242,6 +407,7 @@ export async function syncEventToGoogleDrive(slug, onProgress = () => {}) {
     success: true,
     synced_count: syncedCount,
     total_approved: approvedPhotos.length,
-    folder_id: eventFolderId
+    folder_id: eventFolderId,
+    folder_url: `https://drive.google.com/drive/folders/${eventFolderId}`
   };
 }

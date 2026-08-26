@@ -114,10 +114,10 @@ export const api = {
   }
 };
 
-import { initP2PMesh } from './p2p-mesh.js';
+import { initRealtimeHub } from './realtime.js';
 
 /**
- * P2P WebRTC / Realtime connection handle powered by Trystero
+ * Lightweight Realtime signaling connection handle powered by MQTT & BroadcastChannel
  */
 export function createWebSocketConnection(slugOrMessage, optionsOrStatus, maybeSlug) {
   let slug = '';
@@ -142,10 +142,10 @@ export function createWebSocketConnection(slugOrMessage, optionsOrStatus, maybeS
     };
   }
 
-  const mesh = initP2PMesh(slug, options);
+  const hub = initRealtimeHub(slug, options);
   return {
-    ...mesh,
-    close: () => mesh?.disconnect()
+    ...hub,
+    close: () => hub?.disconnect()
   };
 }
 
