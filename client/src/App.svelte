@@ -2195,7 +2195,7 @@
                   class="text-secondary"
                   style="font-size: 0.8125rem; margin-top: 0.25rem;"
                 >
-                  📅 {guestEventData.date} &bull; Connected to Local WiFi Hub
+                  📅 {guestEventData.date}
                 </p>
               </div>
 
