@@ -1712,7 +1712,7 @@
         <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 2rem;">Last Updated: August 2026</p>
 
         <h3 style="margin-top: 1.5rem;">1. Overview</h3>
-        <p class="text-secondary">EventCaps (<code>https://deidi.github.io/caps/</code>) is a server-less event photo sharing hub. We are committed to protecting your privacy and providing transparent information regarding how data is handled.</p>
+        <p class="text-secondary">EventCaps (<code>https://deidi.github.io/event-caps/</code>) is a server-less event photo sharing hub. We are committed to protecting your privacy and providing transparent information regarding how data is handled.</p>
 
         <h3 style="margin-top: 1.5rem;">2. Google Drive Permissions & Data Use</h3>
         <p class="text-secondary">EventCaps connects to your Google Account using the restricted <code>https://www.googleapis.com/auth/drive.file</code> OAuth scope. This permission is strictly used to:</p>
