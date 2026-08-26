@@ -2232,7 +2232,7 @@
                         : (selectedPreviewPhoto = photo)}
                   >
                     <img
-                      src={photo.thumbnail_path}
+                      src={photo.thumbnail_path || photo.thumb_url || photo.drive_thumb_url || photo.original_path || photo.original_url}
                       alt="Event memory"
                       class="gallery-thumb"
                       loading="lazy"

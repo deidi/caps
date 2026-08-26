@@ -471,16 +471,17 @@ export function initRealtimeHub(slug, options = {}) {
 
       const payloadPhotos = [];
       for (const p of approved) {
+        let thumbUrl = p.drive_thumb_url || p.drive_orig_url || '';
+        let origUrl = p.drive_orig_url || p.drive_thumb_url || '';
         let thumbDataUrl = '';
-        let origDataUrl = '';
-        if (p.thumb_blob) {
-          thumbDataUrl = await blobToBase64(p.thumb_blob);
+
+        if (!thumbUrl && p.thumb_blob) {
+          try {
+            thumbDataUrl = await blobToBase64(p.thumb_blob);
+            thumbUrl = thumbDataUrl;
+            origUrl = thumbDataUrl;
+          } catch (e) {}
         }
-        if (p.original_blob && !p.drive_orig_id) {
-          origDataUrl = await blobToBase64(p.original_blob);
-        }
-        const origUrl = p.drive_orig_url || origDataUrl || thumbDataUrl;
-        const thumbUrl = p.drive_thumb_url || p.drive_orig_url || thumbDataUrl || origUrl;
 
         payloadPhotos.push({
           id: p.id,
