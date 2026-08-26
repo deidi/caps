@@ -482,19 +482,19 @@
       if (msg.type === "photo:new-pending" || msg.type === "photo:uploaded") {
         const photo = msg.payload.photo || msg.payload;
         if (photo.status === "pending") {
-          if (!pendingPhotos.some((p) => p.id === photo.id)) {
+          if (!pendingPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
             pendingPhotos = [photo, ...pendingPhotos];
           }
         } else if (photo.status === "approved") {
-          pendingPhotos = pendingPhotos.filter((p) => p.id !== photo.id);
-          if (!approvedPhotos.some((p) => p.id === photo.id)) {
+          pendingPhotos = pendingPhotos.filter((p) => (p.hash && p.hash === photo.hash) ? false : p.id !== photo.id);
+          if (!approvedPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
             approvedPhotos = [photo, ...approvedPhotos];
           }
         }
       } else if (msg.type === "photo:approved") {
         const photo = msg.payload.photo || msg.payload;
-        pendingPhotos = pendingPhotos.filter((p) => p.id !== photo.id);
-        if (!approvedPhotos.some((p) => p.id === photo.id)) {
+        pendingPhotos = pendingPhotos.filter((p) => (p.hash && p.hash === photo.hash) ? false : p.id !== photo.id);
+        if (!approvedPhotos.some((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id)) {
           approvedPhotos = [photo, ...approvedPhotos];
         }
       } else if (msg.type === "photo:status-changed") {
@@ -1274,6 +1274,7 @@
           guestSession.guest.upload_count = res.quota.used;
 
           if (wsHandle && res.processed) {
+            let cloudUploaded = false;
             try {
               const session = await wsHandle.requestGDriveUploadSession(
                 {
@@ -1315,9 +1316,31 @@
                   guest_name: guestSession.guest.name,
                   guest_token: guestSession.guest.token
                 });
+                cloudUploaded = true;
               }
             } catch (cloudErr) {
-              console.warn('Direct Google Drive upload notification failed:', cloudErr);
+              console.warn('Direct Google Drive upload failed, falling back to direct relay:', cloudErr);
+            }
+
+            if (!cloudUploaded && typeof wsHandle.sendPhotoDirect === 'function') {
+              try {
+                const thumbDataUrl = await blobToBase64(res.processed.thumbBlob);
+                const originalDataUrl = await blobToBase64(res.processed.originalBlob);
+                wsHandle.sendPhotoDirect({
+                  filename: res.processed.filename,
+                  hash: res.processed.hash,
+                  width: res.processed.width,
+                  height: res.processed.height,
+                  size: res.processed.size,
+                  mimeType: res.processed.mimeType,
+                  guest_name: guestSession.guest.name,
+                  guest_token: guestSession.guest.token,
+                  thumbDataUrl,
+                  originalDataUrl
+                });
+              } catch (fallbackErr) {
+                console.error('Direct fallback transmission error:', fallbackErr);
+              }
             }
           }
         } catch (err) {
