@@ -46,22 +46,6 @@
 
 ---
 
-## 🔑 Google Cloud Drive Setup (For Event Hosts)
-
-To enable 100+ guest cloud uploads directly to your Google Drive:
-
-1. Open the **[Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials)**.
-2. Click **Create Credentials > OAuth client ID**.
-3. Set Application type to **Web application**.
-4. Under **Authorized JavaScript origins**, add:
-   - `https://deidi.github.io`
-5. Under **APIs & Services > OAuth consent screen** (or [Audience](https://console.cloud.google.com/auth/audience)):
-   - Set publishing status to **Production** or add your host Google email under **Test users**.
-   - *Note: Do NOT click "Submit for Verification" — verification is not required for personal event hosting on `github.io`.*
-6. In EventCaps, click **"☁️ Connect Google Drive (100+ Mode)"**, paste your Client ID once, and sign in.
-
----
-
 ## 📱 How to Use During an Event
 
 | Role / Device | URL | Instructions |
