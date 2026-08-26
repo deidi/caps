@@ -654,20 +654,66 @@ export async function getEventAnalytics(slug) {
   if (!event) throw new Error('Event not found');
 
   const photos = await db.photos.where('event_slug').equals(slug).toArray();
+  const guests = await db.guests.where('event_slug').equals(slug).toArray();
+
   const total_photos = photos.length;
-  const approved_photos = photos.filter(p => p.status === 'approved').length;
-  const pending_photos = photos.filter(p => p.status === 'pending').length;
-  const total_guests = await db.guests.where('event_slug').equals(slug).count();
-  const storage_size_bytes = photos.reduce((acc, p) => acc + (p.size || 0), 0);
+  const approved = photos.filter(p => p.status === 'approved').length;
+  const pending = photos.filter(p => p.status === 'pending').length;
+  const rejected = photos.filter(p => p.status === 'rejected').length;
+
+  const uniqueGuestsSet = new Set();
+  guests.forEach(g => { if (g.name) uniqueGuestsSet.add(g.name.toLowerCase()); });
+  photos.forEach(p => { if (p.guest_name) uniqueGuestsSet.add(p.guest_name.toLowerCase()); });
+  const unique_guests = Math.max(guests.length, uniqueGuestsSet.size);
+
+  const totalBytes = photos.reduce((acc, p) => acc + (p.size || (p.original_blob ? p.original_blob.size : 0)), 0);
+  const storage_used_mb = (totalBytes / (1024 * 1024)).toFixed(2);
+
+  // Top Contributors
+  const contributorMap = new Map();
+  photos.forEach(p => {
+    const name = (p.guest_name || 'Guest').trim();
+    contributorMap.set(name, (contributorMap.get(name) || 0) + 1);
+  });
+  guests.forEach(g => {
+    const name = (g.name || 'Guest').trim();
+    if (!contributorMap.has(name) && g.upload_count) {
+      contributorMap.set(name, g.upload_count);
+    }
+  });
+
+  const top_contributors = Array.from(contributorMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Uploads by Hour
+  const hourlyMap = new Map();
+  photos.forEach(p => {
+    try {
+      const d = new Date(p.created_at || Date.now());
+      const hourStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      hourlyMap.set(hourStr, (hourlyMap.get(hourStr) || 0) + 1);
+    } catch {
+      hourlyMap.set('Recent', (hourlyMap.get('Recent') || 0) + 1);
+    }
+  });
+
+  const uploads_over_time = Array.from(hourlyMap.entries())
+    .map(([hour, count]) => ({ hour, count }));
 
   return {
     success: true,
     analytics: {
       total_photos,
-      approved_photos,
-      pending_photos,
-      total_guests,
-      storage_size_bytes
+      approved,
+      pending,
+      rejected,
+      unique_guests,
+      storage_used_mb,
+      storage_size_bytes: totalBytes,
+      top_contributors,
+      uploads_over_time
     }
   };
 }

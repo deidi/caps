@@ -2867,7 +2867,7 @@
               <div class="analytics-columns">
                 <div class="analytics-sub-card">
                   <h4>🏆 Top Guest Contributors</h4>
-                  {#if eventAnalytics.top_contributors.length === 0}
+                  {#if !eventAnalytics.top_contributors || eventAnalytics.top_contributors.length === 0}
                     <p
                       class="text-secondary"
                       style="font-size: 0.875rem; margin-top: 0.5rem;"
@@ -2893,7 +2893,7 @@
 
                 <div class="analytics-sub-card">
                   <h4>⏱️ Uploads by Hour</h4>
-                  {#if eventAnalytics.uploads_over_time.length === 0}
+                  {#if !eventAnalytics.uploads_over_time || eventAnalytics.uploads_over_time.length === 0}
                     <p
                       class="text-secondary"
                       style="font-size: 0.875rem; margin-top: 0.5rem;"
