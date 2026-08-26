@@ -941,6 +941,54 @@
     }
   }
 
+  async function handleToggleAutoApprove() {
+    if (!selectedEvent) return;
+    const newModState = !selectedEvent.moderation_enabled;
+    const isAutoNow = !newModState;
+
+    try {
+      await api.updateEvent(selectedEvent.slug, {
+        moderation_enabled: newModState
+      });
+
+      selectedEvent = { ...selectedEvent, moderation_enabled: newModState };
+
+      if (isAutoNow) {
+        successMsg = "⚡ Auto-Approve enabled! All new guest uploads will stream live immediately.";
+        if (pendingPhotos.length > 0) {
+          if (confirm(`Auto-Approve is now ON! Would you like to approve the ${pendingPhotos.length} photo(s) currently waiting in queue?`)) {
+            await handleBulkApprove();
+          }
+        }
+      } else {
+        successMsg = "🛡️ Manual moderation enabled! New photos will wait for your review in this queue.";
+      }
+      setTimeout(() => (successMsg = ""), 4500);
+
+      // Real-time broadcast updated settings to all guest devices and slideshows
+      if (wsHandle) {
+        wsHandle.send({
+          type: "event:settings-updated",
+          payload: {
+            slug: selectedEvent.slug,
+            event_settings: {
+              moderation_enabled: newModState,
+              name: selectedEvent.name,
+              tagline: selectedEvent.tagline,
+              guest_upload_limit: selectedEvent.guest_upload_limit
+            }
+          }
+        });
+        if (typeof wsHandle.broadcastGallery === "function") {
+          wsHandle.broadcastGallery();
+        }
+      }
+      await loadEvents();
+    } catch (err) {
+      alert("Failed to toggle moderation mode: " + err.message);
+    }
+  }
+
   async function handleRejectPhoto(photoId) {
     try {
       const photo = pendingPhotos.find((p) => p.id === photoId);
@@ -2875,22 +2923,40 @@
               <div>
                 <h3>Pending Review ({pendingPhotos.length})</h3>
                 <p class="text-secondary" style="font-size: 0.875rem;">
-                  Approve photos to show them on the venue live wall and guest
-                  feeds.
+                  {selectedEvent.moderation_enabled 
+                    ? "Review and approve attendee photos before they appear on the live wall." 
+                    : "⚡ Auto-Approve is ON: New guest photos stream directly to the live wall without manual review."}
                 </p>
               </div>
 
-              {#if pendingPhotos.length > 0}
-                <div class="bulk-actions">
-                  <button
-                    class="btn-secondary btn-sm"
-                    onclick={handleBulkReject}>Reject All</button
-                  >
-                  <button class="btn-primary btn-sm" onclick={handleBulkApprove}
-                    >Approve All ({pendingPhotos.length})</button
-                  >
-                </div>
-              {/if}
+              <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <button
+                  type="button"
+                  class="auto-approve-toggle-btn {selectedEvent.moderation_enabled ? 'mode-manual' : 'mode-auto'}"
+                  onclick={handleToggleAutoApprove}
+                  title={selectedEvent.moderation_enabled 
+                    ? "Turn ON Auto-Approve (All new photos stream live instantly)" 
+                    : "Turn OFF Auto-Approve (Review incoming photos manually)"}
+                >
+                  {#if selectedEvent.moderation_enabled}
+                    <span>🛡️ Auto-Approve: <strong>OFF</strong></span>
+                  {:else}
+                    <span>⚡ Auto-Approve: <strong>ON</strong></span>
+                  {/if}
+                </button>
+
+                {#if pendingPhotos.length > 0}
+                  <div class="bulk-actions">
+                    <button
+                      class="btn-secondary btn-sm"
+                      onclick={handleBulkReject}>Reject All</button
+                    >
+                    <button class="btn-primary btn-sm" onclick={handleBulkApprove}
+                      >Approve All ({pendingPhotos.length})</button
+                    >
+                  </div>
+                {/if}
+              </div>
             </div>
 
             {#if pendingPhotos.length === 0}
@@ -4434,6 +4500,41 @@
   .quota-helper {
     font-size: 0.875rem;
     color: var(--color-text-secondary);
+  }
+
+  .auto-approve-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.875rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+  }
+
+  .auto-approve-toggle-btn.mode-auto {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+  }
+
+  .auto-approve-toggle-btn.mode-auto:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+  }
+
+  .auto-approve-toggle-btn.mode-manual {
+    background: #f8fafc;
+    color: #475569;
+    border-color: #cbd5e1;
+  }
+
+  .auto-approve-toggle-btn.mode-manual:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
   }
 
   .batch-upload-banner {
