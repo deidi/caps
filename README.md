@@ -25,23 +25,28 @@
 ## 🏗️ Architecture Overview
 
 ```
-                                      ┌──────────────────────────────────────────────┐
-                                      │  📱 Guest Smartphone (100+ Attendees)        │
-                                      └──────┬───────────────────────────────▲───────┘
-                                             │                               │
-                      1. Request Upload Slot │                               │ 3. Direct Binary PUT
-                         (Tiny JSON, ~100B)  │                               │    (Bypasses host)
-                                             ▼                               │
-┌──────────────────────────────────────────────┐                             │
-│  💻 Host Laptop / Dashboard                  │                             │
-│  - 1-Click Google Connected                  │                             │
-│  - Generates Signed Resumable Upload Session ├─────────────────────────┐   │
-└──────────────────────────────────────────────┘                         │   │
-                                                                         ▼   │
-                                                       ┌─────────────────────┴────────┐
-                                                       │  ☁️ Google Cloud Drive & CDN  │
-                                                       │  /EventCaps Events/<Event>/  │
-                                                       └──────────────────────────────┘
+                                 ┌──────────────────────────────────────────────┐
+                                 │     📱 Guest Smartphones (100+ Attendees)    │
+                                 │  - In-Browser Resize & Thumbnail Gen (360px) │
+                                 │  - Real-Time Live Memories Wall              │
+                                 └──────┬───────────────────────────────▲───────┘
+                                        │                               │
+                1. Signaling & Approval │                               │ 3. Approved Media Stream
+                   (MQTT / WebSockets)  │                               │    (Google CDN or P2P)
+                                        ▼                               │
+┌─────────────────────────────────────────────────────────┐             │
+│              💻 Host Dashboard (Browser SPA)            │             │
+│  - Event Configuration & SHA-256 PIN Security           │             │
+│  - Real-Time Moderation Queue & Analytics Engine        ├─────────────┼────────────────────────┐
+│  - Local Storage (IndexedDB) + 1-Click Google Drive Sync│             │                        │
+└───────────────────────────┬─────────────────────────────┘             │                        │
+                            │                                           │                        │
+                            │ 2. Resumable Upload Session               │                        │
+                            ▼                                           ▼                        ▼
+              ┌───────────────────────────┐               ┌──────────────────────────┐ ┌───────────────────┐
+              │ ☁️ Google Cloud Drive CDN │               │ 📺 Projector / TV Screen │ │ 📦 ZIP Archiver   │
+              │  /EventCaps Events/<slug> │               │ - Real-Time Slideshow    │ │ - In-Memory Export│
+              └───────────────────────────┘               └──────────────────────────┘ └───────────────────┘
 ```
 
 ---
