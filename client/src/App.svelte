@@ -307,10 +307,18 @@
         slideshowPhotos = [...slideshowPhotos, ...toAdd];
       } else if (msg.type === "gallery:synced") {
         const syncedPhotos = msg.payload.photos || [];
+        const syncedHashes = new Set(syncedPhotos.map((p) => p.hash).filter(Boolean));
+        const syncedIds = new Set(syncedPhotos.map((p) => p.id).filter(Boolean));
+
+        // Prune any photo no longer in syncedPhotos
+        slideshowPhotos = slideshowPhotos.filter(
+          (p) => (p.hash && syncedHashes.has(p.hash)) || (p.id && syncedIds.has(p.id)),
+        );
+
         for (const photo of syncedPhotos) {
           if (
             !slideshowPhotos.some(
-              (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+              (p) => (p.hash && p.hash === photo.hash) || (p.id && p.id === photo.id),
             )
           ) {
             const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
@@ -418,13 +426,21 @@
         }
 
         const syncedPhotos = msg.payload.photos || [];
+        const syncedHashes = new Set(syncedPhotos.map((p) => p.hash).filter(Boolean));
+        const syncedIds = new Set(syncedPhotos.map((p) => p.id).filter(Boolean));
+
+        // Prune any photo no longer in syncedPhotos from live gallery
+        liveGalleryPhotos = liveGalleryPhotos.filter(
+          (p) => (p.hash && syncedHashes.has(p.hash)) || (p.id && syncedIds.has(p.id)),
+        );
+
         for (const photo of syncedPhotos) {
           if (
             !liveGalleryPhotos.some(
-              (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
+              (p) => (p.hash && p.hash === photo.hash) || (p.id && p.id === photo.id),
             )
           ) {
-            const localMatch = myUploads.find((p) => p.hash === photo.hash);
+            const localMatch = myUploads.find((p) => (p.hash && p.hash === photo.hash) || (p.id && p.id === photo.id));
             if (localMatch) {
               liveGalleryPhotos = [
                 ...liveGalleryPhotos,
@@ -506,11 +522,26 @@
         const removeId = msg.payload.id;
         const removeHash = msg.payload.hash;
         liveGalleryPhotos = liveGalleryPhotos.filter(
-          (p) => p.id !== removeId && (!removeHash || p.hash !== removeHash),
+          (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
         );
-        myUploads = myUploads.filter(
-          (p) => p.id !== removeId && (!removeHash || p.hash !== removeHash),
-        );
+        if (msg.type === "photo:deleted") {
+          myUploads = myUploads.filter(
+            (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
+          );
+        } else if (msg.type === "photo:removed") {
+          myUploads = myUploads.map((p) =>
+            (removeId && p.id === removeId) || (removeHash && p.hash === removeHash)
+              ? { ...p, status: "pending" }
+              : p,
+          );
+        }
+        if (removeHash) {
+          db.photos
+            .where("hash")
+            .equals(removeHash)
+            .modify({ status: msg.type === "photo:deleted" ? "rejected" : "pending" })
+            .catch(() => {});
+        }
         if (selectedPhotoIds.has(removeId)) {
           selectedPhotoIds.delete(removeId);
           selectedPhotoIds = new Set(selectedPhotoIds);
@@ -520,7 +551,9 @@
         liveGalleryPhotos = liveGalleryPhotos.filter(
           (p) => !removedIds.has(p.id),
         );
-        myUploads = myUploads.filter((p) => !removedIds.has(p.id));
+        myUploads = myUploads.map((p) =>
+          removedIds.has(p.id) ? { ...p, status: "pending" } : p
+        );
       }
     } else if (selectedEvent) {
       if (msg.type === "photo:new-pending" || msg.type === "photo:uploaded") {
@@ -866,6 +899,7 @@
           type: "photo:deleted",
           payload: { id: photoId, hash: photo?.hash },
         });
+        wsHandle.broadcastGallery();
       }
       await loadEvents();
     } catch (err) {
@@ -894,11 +928,32 @@
             type: "photo:removed",
             payload: { id: photoId, hash: photo?.hash },
           });
+          wsHandle.broadcastGallery();
         }
       }
       await loadEvents();
     } catch (err) {
       alert("Failed to revert photo: " + err.message);
+    }
+  }
+
+  async function handleDeleteLivePhoto(photoId) {
+    if (!confirm("Permanently remove and reject this photo?")) return;
+    try {
+      const photo = approvedPhotos.find((p) => p.id === photoId) || pendingPhotos.find((p) => p.id === photoId);
+      await api.patchPhotoStatus(selectedEvent.slug, photoId, "rejected");
+      approvedPhotos = approvedPhotos.filter((p) => p.id !== photoId);
+      pendingPhotos = pendingPhotos.filter((p) => p.id !== photoId);
+      if (wsHandle) {
+        wsHandle.send({
+          type: "photo:deleted",
+          payload: { id: photoId, hash: photo?.hash },
+        });
+        wsHandle.broadcastGallery();
+      }
+      await loadEvents();
+    } catch (err) {
+      alert("Failed to delete photo: " + err.message);
     }
   }
 
@@ -2837,13 +2892,24 @@
                         <strong>{photo.guest_name || "Anonymous Guest"}</strong>
                         <span class="status-pill pill-approved">🟢 Live</span>
                       </div>
-                      <button
-                        class="btn-secondary btn-sm"
-                        style="width: 100%; margin-top: 0.5rem;"
-                        onclick={() => handleRevertPhoto(photo.id)}
-                      >
-                        ↩️ Revert to Pending
-                      </button>
+                      <div style="display: flex; gap: 0.35rem; margin-top: 0.5rem;">
+                        <button
+                          class="btn-secondary btn-sm"
+                          style="flex: 1;"
+                          onclick={() => handleRevertPhoto(photo.id)}
+                          title="Revert back to moderation queue"
+                        >
+                          ↩️ Revert
+                        </button>
+                        <button
+                          class="btn-secondary btn-sm"
+                          style="color: var(--color-danger); padding: 0.375rem 0.65rem;"
+                          onclick={() => handleDeleteLivePhoto(photo.id)}
+                          title="Delete photo permanently"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   </div>
                 {/each}
