@@ -112,5 +112,86 @@ Click the **📊 Analytics** tab inside any event to inspect real-time metrics:
 
 ---
 
+## 🛠️ Complete Application Functions & Features
+
+EventCaps provides an all-in-one suite of tools for event hosts, photographers, and attendees:
+
+### 🔐 1. Host Authentication & Security
+- **One-Time Host Setup**: Initialize host profile with custom Display Name / Role and 4+ digit Admin PIN.
+- **SHA-256 Security**: Passwords and session tokens are encrypted client-side using browser-native cryptography.
+- **Header Profile & PIN Manager (`👤 [Host Name] ⚙️`)**: Update your display name or change your Admin PIN at any time with current PIN verification.
+- **Dashboard Lock / Unlock**: Protect host controls and event spaces with quick PIN unlock.
+
+### 🎪 2. Event Space Management
+- **Instant Event Creation**: Set custom Event Name, scheduled Date, Tagline message, and per-guest upload limits (1–500).
+- **Branding & Custom Logo**: Upload custom PNG/JPG event logos and update event taglines in real time.
+- **Event Lifecycle Controls**:
+  - **`🔒 Close Event`**: Concludes the event, displays a commemorative banner, and disables new uploads while keeping the live gallery open.
+  - **`🟢 Reopen Event`**: Re-activates closed events to allow new uploads.
+  - **`🗑️ Permanent Delete`**: Deletes the event and all associated photos/guest records from local storage.
+- **QR Code Sharing**: Generates high-contrast QR codes for venue screens, printable posters, or table cards.
+
+### 🛡️ 3. Real-Time Moderation Queue & 1-Click Auto-Approve
+- **Live Review Feed**: Inspect incoming photos with guest attribution and upload timestamps.
+- **1-Click Review Actions**:
+  - **`Approve`** / **`Reject`**: Individual photo moderation.
+  - **`Approve All`** / **`Reject All`**: Bulk batch actions for high-traffic moments.
+- **⚡ 1-Click Auto-Approve Toggle**:
+  - Switch between **`⚡ Auto-Approve: ON`** (new photos stream live instantly) and **`🛡️ Auto-Approve: OFF`** (manual review mode) directly in the queue header.
+  - When activating Auto-Approve, one-click prompt lets you immediately approve all waiting photos.
+- **Published Live Gallery Controls**:
+  - **`↩️ Revert to Pending`**: Instantly removes an approved photo from live screens back into the moderation queue.
+  - **`🗑️ Permanent Delete`**: Purges photos permanently across host and all attendee screens.
+- **Full-Resolution Lightbox**: High-res preview with author details and original file download.
+
+### 📱 4. Frictionless Guest Experience
+- **Zero App Downloads**: Attendees join in seconds by scanning a QR code or opening `#/event/<slug>` in any mobile browser.
+- **Simple Identity**: Enter attendee name once to start sharing memories.
+- **In-Browser Image Engine**:
+  - Automatically resizes raw photos to **2048px** for fast delivery.
+  - Generates lightweight **360px thumbnails** for instant grid loading.
+  - Corrects EXIF camera orientation and strips private GPS coordinates.
+  - Computes SHA-256 hashes to prevent accidental duplicate uploads.
+- **📊 Live Batch Upload Progress Widget**:
+  - Real-time sequential counter (`Uploading Photos 2 of 5`).
+  - Animated green progress track and percentage indicator (`0%–100%`).
+  - Micro-status feedback: *“Optimizing image...”*, *“Streaming to Google Drive...”*, *“Delivered to Host Moderation Queue!”*.
+- **My Shared Photos Feed**:
+  - Live status badges: **🟡 Pending Review**, **🟢 Live on Wall**, **🔴 Rejected**.
+  - **`&times;` Delete Button**: Allows guests to remove their own photos and immediately free up upload quota slots.
+
+### 🖼️ 5. Live Memories Wall & Multi-Photo Exporter
+- **Universal Real-Time Feed**: Sub-second photo broadcasting with MQTT retained state synchronization.
+- **Multi-Photo Selection**: Select multiple photos to download as a custom batch `.ZIP` archive.
+- **Download Full Event Album**: 1-Click export to download all approved event memories in an uncompressed `.ZIP` file.
+
+### 📺 6. TV & Projector Slideshow Mode (`#/event/<slug>/slideshow`)
+- **Fullscreen Presentation**: Designed for venue projectors, LED walls, and smart TV browsers.
+- **Dynamic Auto-Advancing Stream**: Automatically cycles through newly approved photos in real time.
+- **Keyboard Shortcuts**:
+  - **`F`**: Enter / Exit Fullscreen mode.
+  - **`Space`**: Pause / Resume slideshow carousel.
+  - **`← / →`**: Manually advance or revisit slides.
+- **Customizable Presentation Settings**: Adjust interval speed (3s, 5s, 10s), transition effects (fade, slide, zoom), author credit overlay, and live QR watermark.
+
+### ☁️ 7. Dual Storage Architecture (IndexedDB & Google Drive 100+ Mode)
+- **Local Browser Hub (Zero Setup)**: Runs 100% serverless using HTML5 IndexedDB (`Dexie.js`) inside the host's browser.
+- **Google Drive Cloud Mode (100+ Attendees)**: 1-Click Google OAuth sign-in. Guests upload directly to Google Drive cloud folders via signed resumable sessions, bypassing host bandwidth limits.
+- **Google Cloud CDN**: Streams high-speed media from Google's global content delivery network.
+- **In-Memory ZIP Archiver**: Built-in `JSZip` + `FileSaver.js` generates ZIP archives on-the-fly in under 2 seconds.
+
+### 📊 8. Event Engagement & Analytics Dashboard
+- **Live Metric KPI Cards**: Total Uploads, Approved & Live count, Active Attendees, Storage Footprint in MB.
+- **🏆 Top Guest Contributors**: Ranked leaderboard recognizing top attendee photographers.
+- **⏱️ Activity Timeline by Hour**: Scaled interactive bar chart mapping photo submission volume over the course of the event.
+
+### 📴 9. Offline PWA & Zero-Cache Resilience
+- **Offline Upload Queue**: Photos captured without internet are queued locally and automatically flush when reconnected.
+- **PWA Installation**: Installable as a native app icon on iOS and Android home screens.
+- **Network-First Service Worker**: Implements `no-store` network-first caching so app updates deploy instantly without stale cache locks.
+- **Built-in Compliance**: Dedicated **Privacy Policy (`#/privacy`)** and **Terms of Service (`#/terms`)** routes for Google OAuth compliance.
+
+---
+
 ## 📄 License & Credits
 Developed with ❤️ by deidi & Open Source Community. Released under the MIT License.
