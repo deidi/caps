@@ -619,15 +619,40 @@
           pendingPhotos = pendingPhotos.filter((p) => !idSet.has(p.id));
           approvedPhotos = approvedPhotos.filter((p) => !idSet.has(p.id));
         }
-      } else if (msg.type === "photo:removed") {
-        // photo:removed means removed from public live gallery/slideshow; only remove from approvedPhotos
-        const removeId = msg.payload.id;
-        approvedPhotos = approvedPhotos.filter((p) => p.id !== removeId);
-      } else if (msg.type === "photo:deleted") {
-        // photo:deleted means hard/soft deleted entirely
-        const removeId = msg.payload.id;
-        pendingPhotos = pendingPhotos.filter((p) => p.id !== removeId);
-        approvedPhotos = approvedPhotos.filter((p) => p.id !== removeId);
+      } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
+        const removeId = msg.payload?.id;
+        const removeHash = msg.payload?.hash;
+
+        // 1. Remove from Host active UI state
+        approvedPhotos = approvedPhotos.filter(
+          (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
+        );
+        pendingPhotos = pendingPhotos.filter(
+          (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
+        );
+
+        // 2. Remove/mark deleted in Host IndexedDB
+        if (removeHash) {
+          db.photos.where("hash").equals(removeHash).delete().catch(() => {});
+        }
+        if (removeId && !isNaN(parseInt(removeId, 10))) {
+          db.photos.delete(parseInt(removeId, 10)).catch(() => {});
+        }
+
+        // 3. Decrement guest upload count in Host DB if guest_token is present
+        if (msg.payload?.guest_token) {
+          db.guests.where("token").equals(msg.payload.guest_token).modify(g => {
+            g.upload_count = Math.max(0, (g.upload_count || 1) - 1);
+          }).catch(() => {});
+        }
+
+        // 4. Update Host events / analytics counters
+        loadEvents().catch(() => {});
+
+        // 5. Re-broadcast the updated approved gallery so MQTT retained state & all devices update
+        if (wsHandle && typeof wsHandle.broadcastGallery === "function") {
+          wsHandle.broadcastGallery();
+        }
       }
     }
   }
@@ -1553,18 +1578,36 @@
     )
       return;
     try {
+      const deletedPhoto = myUploads.find(p => p.id === photoId) || liveGalleryPhotos.find(p => p.id === photoId);
+      const photoHash = deletedPhoto?.hash;
       const res = await api.deletePhoto(
         currentEventSlug,
         photoId,
         guestSession.guest.token,
       );
-      myUploads = myUploads.filter((p) => p.id !== photoId);
-      liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== photoId);
-      guestSession.quota = res.quota;
-      guestSession.guest.upload_count = res.quota.used;
-      if (selectedPreviewPhoto && selectedPreviewPhoto.id === photoId) {
+      myUploads = myUploads.filter((p) => p.id !== photoId && (!photoHash || p.hash !== photoHash));
+      liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== photoId && (!photoHash || p.hash !== photoHash));
+      if (guestSession?.quota) {
+        guestSession.quota = res.quota;
+        if (guestSession.guest) guestSession.guest.upload_count = res.quota.used;
+      }
+      if (selectedPreviewPhoto && (selectedPreviewPhoto.id === photoId || (photoHash && selectedPreviewPhoto.hash === photoHash))) {
         selectedPreviewPhoto = null;
       }
+
+      // Send real-time signal to host and all attendees
+      if (wsHandle) {
+        wsHandle.send({
+          type: "photo:deleted",
+          payload: {
+            id: photoId,
+            hash: photoHash,
+            event_slug: currentEventSlug,
+            guest_token: guestSession?.guest?.token
+          }
+        });
+      }
+
       successMsg = "Photo removed and slot freed!";
       setTimeout(() => (successMsg = ""), 3000);
     } catch (err) {
