@@ -868,9 +868,20 @@
 
     try {
       const res = await api.updateEventStatus(selectedEvent.slug, newStatus);
-      selectedEvent.status = res.event.status;
-      successMsg = res.message;
-      setTimeout(() => (successMsg = ""), 3000);
+      selectedEvent = { ...selectedEvent, status: newStatus };
+      successMsg = res.message || `Event status updated to ${newStatus}`;
+      setTimeout(() => (successMsg = ""), 3500);
+
+      // Real-time broadcast status change to guest phones and TV slideshow
+      if (wsHandle) {
+        wsHandle.send({
+          type: "event:status-changed",
+          payload: { slug: selectedEvent.slug, status: newStatus }
+        });
+        if (typeof wsHandle.broadcastGallery === "function") {
+          wsHandle.broadcastGallery();
+        }
+      }
       await loadEvents();
     } catch (err) {
       alert("Failed to update event status: " + err.message);

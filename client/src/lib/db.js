@@ -311,7 +311,13 @@ export async function updateEventStatus(slug, status) {
   if (!event) throw new Error('Event not found');
 
   await db.events.where('slug').equals(slug).modify({ status });
-  return { success: true, status };
+  const updated = await db.events.where('slug').equals(slug).first();
+  return { 
+    success: true, 
+    status, 
+    event: updated,
+    message: status === 'archived' ? 'Event closed and archived. Guest uploads are now disabled.' : 'Event reopened! Guest uploads are now active.'
+  };
 }
 
 /**
