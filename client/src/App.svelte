@@ -93,6 +93,8 @@
   let myUploads = $state([]);
   let liveGalleryPhotos = $state([]);
   let isUploading = $state(false);
+  let uploadCurrentIndex = $state(0);
+  let uploadTotalCount = $state(0);
   let uploadProgressText = $state("");
   let selectedPreviewPhoto = $state(null);
   let wsConnectionStatus = $state("disconnected");
@@ -1427,6 +1429,8 @@
     }
 
     isUploading = true;
+    uploadTotalCount = files.length;
+    uploadCurrentIndex = 0;
     errorMsg = "";
     successMsg = "";
 
@@ -1436,7 +1440,8 @@
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      uploadProgressText = `Uploading ${i + 1} of ${files.length}...`;
+      uploadCurrentIndex = i + 1;
+      uploadProgressText = `Optimizing & hashing photo ${i + 1} of ${files.length}...`;
 
       if (!isOnline) {
         try {
@@ -1446,12 +1451,14 @@
             guestSession.guest.token,
           );
           offlineQueuedCount++;
+          uploadProgressText = `Queued photo ${i + 1} of ${files.length} (offline)`;
         } catch (err) {
           console.error("Offline queue failed:", err);
           failMsg = "Failed to queue offline photo";
         }
       } else {
         try {
+          uploadProgressText = `Sending photo ${i + 1} of ${files.length} to Host Moderation Queue...`;
           const res = await api.uploadPhoto(
             currentEventSlug,
             file,
@@ -1464,6 +1471,7 @@
           if (wsHandle && res.processed) {
             let cloudUploaded = false;
             try {
+              uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
               const session = await wsHandle.requestGDriveUploadSession(
                 {
                   filename: res.processed.filename,
@@ -1479,6 +1487,7 @@
               );
 
               if (session && session.origUploadUri && session.thumbUploadUri) {
+                uploadProgressText = `Streaming photo ${i + 1} of ${files.length} to Google Drive...`;
                 const [origResult, thumbResult] = await Promise.all([
                   gdrive.uploadBlobToResumableSession(
                     session.origUploadUri,
@@ -1512,6 +1521,7 @@
 
             if (!cloudUploaded && typeof wsHandle.sendPhotoDirect === 'function') {
               try {
+                uploadProgressText = `Delivering photo ${i + 1} of ${files.length} to Host Queue...`;
                 const thumbDataUrl = await blobToBase64(res.processed.thumbBlob);
                 const originalDataUrl = await blobToBase64(res.processed.originalBlob);
                 wsHandle.sendPhotoDirect({
@@ -1559,6 +1569,8 @@
 
     e.target.value = "";
     isUploading = false;
+    uploadCurrentIndex = 0;
+    uploadTotalCount = 0;
     uploadProgressText = "";
 
     await refreshOfflineQueueCount();
@@ -1569,9 +1581,9 @@
     if (successCount > 0) {
       successMsg =
         successCount === 1
-          ? "Photo uploaded successfully!"
-          : `${successCount} photos uploaded successfully!`;
-      setTimeout(() => (successMsg = ""), 4000);
+          ? "🎉 Photo delivered to Host Moderation Queue!"
+          : `🎉 All ${successCount} photos submitted to Host Moderation Queue!`;
+      setTimeout(() => (successMsg = ""), 5000);
     }
 
     if (offlineQueuedCount > 0) {
@@ -2230,9 +2242,25 @@
               </div>
 
               {#if isUploading}
-                <div class="upload-progress-pill">
-                  <div class="mini-spinner"></div>
-                  <span>{uploadProgressText}</span>
+                <div class="batch-upload-banner">
+                  <div class="batch-upload-header">
+                    <div class="batch-upload-title">
+                      <div class="mini-spinner"></div>
+                      <span>Uploading Photos ({uploadCurrentIndex} of {uploadTotalCount})</span>
+                    </div>
+                    <span class="batch-upload-percent">
+                      {uploadTotalCount > 0 ? Math.round((uploadCurrentIndex / uploadTotalCount) * 100) : 0}%
+                    </span>
+                  </div>
+                  <div class="batch-progress-track">
+                    <div
+                      class="batch-progress-fill"
+                      style="width: {uploadTotalCount > 0 ? Math.max(8, (uploadCurrentIndex / uploadTotalCount) * 100) : 0}%;"
+                    ></div>
+                  </div>
+                  <p class="batch-upload-status">
+                    🔄 {uploadProgressText || "Sending to Host Moderation Queue..."}
+                  </p>
                 </div>
               {:else if guestEventData.status !== "archived"}
                 <span class="quota-helper">
@@ -4397,16 +4425,63 @@
     color: var(--color-text-secondary);
   }
 
-  .upload-progress-pill {
+  .batch-upload-banner {
+    width: 100%;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: var(--radius-md);
+    padding: 0.875rem 1.125rem;
+    margin-top: 0.75rem;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .batch-upload-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .batch-upload-title {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    background: var(--color-primary-light);
-    color: var(--color-primary-dark);
-    padding: 0.5rem 1rem;
+    gap: 0.625rem;
+    color: #166534;
+    font-size: 0.9375rem;
+    font-weight: 700;
+  }
+
+  .batch-upload-percent {
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: #15803d;
+    background: #dcfce7;
+    padding: 0.2rem 0.55rem;
     border-radius: var(--radius-pill);
-    font-size: 0.875rem;
-    font-weight: 600;
+    border: 1px solid #bbf7d0;
+  }
+
+  .batch-progress-track {
+    width: 100%;
+    height: 8px;
+    background: #dcfce7;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 0.4rem;
+  }
+
+  .batch-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+    border-radius: 999px;
+    transition: width 0.3s ease;
+  }
+
+  .batch-upload-status {
+    font-size: 0.8125rem;
+    color: #166534;
+    margin: 0;
+    font-weight: 500;
   }
 
   .mini-spinner {
