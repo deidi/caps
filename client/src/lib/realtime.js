@@ -10,7 +10,7 @@ import {
 
 /**
  * Ultra-Lightweight Real-time PubSub Event Bus
- * Handles Google Drive cloud uploads with direct fallback signaling.
+ * Handles Google Drive cloud uploads with retained gallery sync and instant request/response.
  */
 export function initRealtimeHub(slug, options = {}) {
   if (!slug) return null;
@@ -27,6 +27,8 @@ export function initRealtimeHub(slug, options = {}) {
   const myClientId = 'client_' + Math.random().toString(36).substring(2, 10);
   const topicBase = `eventcaps_${slug}`;
   const topicBroadcast = `${topicBase}/broadcast`;
+  const topicGalleryRetained = `${topicBase}/gallery_retained`;
+  const topicGalleryReq = `${topicBase}/gallery_req`;
   const topicPhotos = `${topicBase}/photos`;
   const topicGDriveReq = `${topicBase}/gdrive_req`;
   const topicGDriveReadyPattern = `${topicBase}/gdrive_ready/+`;
@@ -50,6 +52,8 @@ export function initRealtimeHub(slug, options = {}) {
             await handleIncomingGDriveDone(event.data.payload);
           } else if (event.data.type === 'local:photo-direct' && isHost) {
             await handleIncomingDirectPhoto(event.data.payload);
+          } else if (event.data.type === 'local:gallery-req' && isHost) {
+            await broadcastApprovedGallery();
           } else {
             onMessage(event.data);
           }
@@ -81,6 +85,8 @@ export function initRealtimeHub(slug, options = {}) {
 
       client.subscribe([
         topicBroadcast,
+        topicGalleryRetained,
+        topicGalleryReq,
         topicPhotos,
         topicGDriveReq,
         topicGDriveReadyPattern,
@@ -89,6 +95,11 @@ export function initRealtimeHub(slug, options = {}) {
         topicPresence
       ], (err) => {
         if (err) console.warn('MQTT subscribe warning:', err);
+        
+        // As soon as guest subscribes, explicitly request gallery sync from host
+        if (!isHost) {
+          requestGallerySync();
+        }
       });
 
       // Presence heartbeat
@@ -109,10 +120,12 @@ export function initRealtimeHub(slug, options = {}) {
         const payload = JSON.parse(messageBuffer.toString());
         if (payload.senderId === myClientId) return;
 
-        if (topic === topicBroadcast) {
+        if (topic === topicBroadcast || topic === topicGalleryRetained) {
           if (payload.msg) {
             onMessage(payload.msg);
           }
+        } else if (topic === topicGalleryReq && isHost) {
+          await broadcastApprovedGallery();
         } else if (topic === topicPhotos && isHost) {
           if (payload.photo) {
             await handleIncomingDirectPhoto(payload.photo);
@@ -160,6 +173,21 @@ export function initRealtimeHub(slug, options = {}) {
     });
   } catch (err) {
     console.error('Failed to initialize realtime connection:', err);
+  }
+
+  function requestGallerySync() {
+    if (client && client.connected) {
+      client.publish(topicGalleryReq, JSON.stringify({
+        senderId: myClientId,
+        timestamp: Date.now()
+      }));
+    }
+    if (localChannel) {
+      localChannel.postMessage({
+        type: 'local:gallery-req',
+        payload: { senderId: myClientId }
+      });
+    }
   }
 
   // --- GOOGLE DRIVE SESSION COORDINATION ---
@@ -314,14 +342,8 @@ export function initRealtimeHub(slug, options = {}) {
         payload: formattedPhoto
       });
 
-      if (initialStatus === 'approved' && client && client.connected) {
-        client.publish(topicBroadcast, JSON.stringify({
-          senderId: myClientId,
-          msg: {
-            type: 'photo:approved',
-            payload: formattedPhoto
-          }
-        }));
+      if (initialStatus === 'approved') {
+        broadcastApprovedGallery();
       }
     } catch (err) {
       console.error('Failed to handle gdrive:done payload:', err);
@@ -408,14 +430,8 @@ export function initRealtimeHub(slug, options = {}) {
         payload: formattedPhoto
       });
 
-      if (initialStatus === 'approved' && client && client.connected) {
-        client.publish(topicBroadcast, JSON.stringify({
-          senderId: myClientId,
-          msg: {
-            type: 'photo:approved',
-            payload: formattedPhoto
-          }
-        }));
+      if (initialStatus === 'approved') {
+        broadcastApprovedGallery();
       }
     } catch (err) {
       console.error('Failed to handle direct photo payload:', err);
@@ -502,10 +518,17 @@ export function initRealtimeHub(slug, options = {}) {
         }
       };
 
+      // 1. Broadcast live to active peers
       client.publish(`${topicBase}/broadcast`, JSON.stringify({
         senderId: myClientId,
         msg: syncMsg
       }));
+
+      // 2. Publish as retained message so ANY newly connecting peer gets it immediately
+      client.publish(topicGalleryRetained, JSON.stringify({
+        senderId: myClientId,
+        msg: syncMsg
+      }), { retain: true, qos: 1 });
 
       if (localChannel) {
         localChannel.postMessage(syncMsg);
@@ -527,6 +550,12 @@ export function initRealtimeHub(slug, options = {}) {
       if (localChannel) {
         localChannel.postMessage(msg);
       }
+    },
+
+    requestGallerySync,
+
+    broadcastGallery: () => {
+      if (isHost) broadcastApprovedGallery();
     },
 
     notifyGuestJoin: (guestData) => {

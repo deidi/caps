@@ -1198,6 +1198,15 @@
       };
       guestNameInput = "";
       await loadMyUploads(currentEventSlug, res.guest.token);
+      if (wsHandle) {
+        wsHandle.notifyGuestJoin({
+          name: res.guest.name,
+          token: res.guest.token,
+        });
+        if (typeof wsHandle.requestGallerySync === "function") {
+          wsHandle.requestGallerySync();
+        }
+      }
     } catch (err) {
       console.error("handleGuestJoin error:", err);
       errorMsg = err.message || "Failed to join event";
