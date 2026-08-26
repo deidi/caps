@@ -1580,6 +1580,19 @@
           {/if}
 
           {#if !isGuestRoute && authStatus.is_authenticated}
+            {#if isDriveConnected}
+              <span class="status-pill pill-approved" style="font-size: 0.8125rem;">
+                ☁️ Google Drive Connected
+              </span>
+            {:else}
+              <button
+                class="btn-secondary btn-sm"
+                onclick={handleConnectGoogleDrive}
+                title="Connect Google Drive to store event photos"
+              >
+                <span>☁️</span> Connect Google Drive
+              </button>
+            {/if}
             <span class="host-badge"
               >Host: <strong>{authStatus.host_name}</strong></span
             >
@@ -2217,7 +2230,29 @@
               Manage gatherings, generate QR codes, and moderate captures.
             </p>
           </div>
-          <div style="display: flex; gap: 0.75rem;">
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            {#if isDriveConnected}
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="status-pill pill-approved">
+                  ☁️ Google Drive Connected
+                </span>
+                <button
+                  class="btn-secondary btn-sm"
+                  onclick={handleDisconnectGoogleDrive}
+                  title="Disconnect Google Drive"
+                >
+                  Disconnect
+                </button>
+              </div>
+            {:else}
+              <button
+                class="btn-secondary"
+                onclick={handleConnectGoogleDrive}
+                title="Connect your Google Drive to host photos for 100+ guests"
+              >
+                <span>☁️</span> Connect Google Drive (100+ Mode)
+              </button>
+            {/if}
             <button
               class="btn-primary"
               onclick={() => (isCreateModalOpen = true)}
