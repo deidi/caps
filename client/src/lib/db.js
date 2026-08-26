@@ -140,6 +140,36 @@ export async function setupHost(host_name, pin) {
 }
 
 /**
+ * Update Host Name / Role and Admin PIN
+ */
+export async function updateHostProfile({ host_name, current_pin, new_pin }) {
+  const setting = await db.settings.get(1);
+  if (!setting) throw new Error('Host not initialized');
+
+  if (current_pin) {
+    const currentHash = await sha256(current_pin);
+    if (currentHash !== setting.pin_hash) {
+      throw new Error('Current Admin PIN is incorrect');
+    }
+  }
+
+  const updates = {};
+  if (host_name && host_name.trim()) {
+    updates.host_name = host_name.trim();
+  }
+  if (new_pin && new_pin.trim()) {
+    updates.pin_hash = await sha256(new_pin.trim());
+  }
+
+  await db.settings.update(1, updates);
+  const updated = await db.settings.get(1);
+  return {
+    success: true,
+    host_name: updated.host_name
+  };
+}
+
+/**
  * Verify host PIN
  */
 export async function verifyPin(pin) {

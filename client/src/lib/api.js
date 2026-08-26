@@ -32,6 +32,7 @@ export const api = {
   // Auth & Setup
   getAuthStatus: () => dbMethods.getAuthStatus(),
   setupHost: (host_name, pin) => dbMethods.setupHost(host_name, pin),
+  updateHostProfile: (data) => dbMethods.updateHostProfile(data),
   verifyPin: (pin) => dbMethods.verifyPin(pin),
 
   // Events

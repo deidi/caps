@@ -56,6 +56,11 @@
   let isDeleteModalOpen = $state(false);
   let deleteConfirmInput = $state("");
   let isSubmitting = $state(false);
+  let isProfileModalOpen = $state(false);
+  let editHostName = $state("");
+  let currentPinInput = $state("");
+  let newPinInput = $state("");
+  let profileErrorMsg = $state("");
 
   // New event form
   let newEvent = $state({
@@ -658,6 +663,36 @@
     if (wsHandle) {
       wsHandle.disconnect();
       wsHandle = null;
+    }
+  }
+
+  function openProfileModal() {
+    editHostName = authStatus.host_name || "";
+    currentPinInput = "";
+    newPinInput = "";
+    profileErrorMsg = "";
+    isProfileModalOpen = true;
+  }
+
+  async function handleSaveProfile(e) {
+    e.preventDefault();
+    if (!editHostName.trim()) return;
+    isSubmitting = true;
+    profileErrorMsg = "";
+    try {
+      const res = await api.updateHostProfile({
+        host_name: editHostName.trim(),
+        current_pin: currentPinInput.trim() || undefined,
+        new_pin: newPinInput.trim() || undefined,
+      });
+      authStatus.host_name = res.host_name;
+      isProfileModalOpen = false;
+      successMsg = "Host profile and PIN updated successfully!";
+      setTimeout(() => (successMsg = ""), 3500);
+    } catch (err) {
+      profileErrorMsg = err.message || "Failed to update profile";
+    } finally {
+      isSubmitting = false;
     }
   }
 
@@ -1696,9 +1731,14 @@
                 <span>☁️</span> Connect Google Drive
               </button>
             {/if}
-            <span class="host-badge"
-              >Host: <strong>{authStatus.host_name}</strong></span
+            <button
+              class="btn-secondary btn-sm host-badge"
+              onclick={openProfileModal}
+              title="Edit Host Profile & PIN"
+              style="cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;"
             >
+              <span>👤</span> <strong>{authStatus.host_name}</strong> <span>⚙️</span>
+            </button>
             <button class="btn-secondary btn-sm" onclick={handleLogout}
               >Lock</button
             >
@@ -2431,6 +2471,13 @@
                 <span>☁️</span> Connect Google Drive (100+ Mode)
               </button>
             {/if}
+            <button
+              class="btn-secondary"
+              onclick={openProfileModal}
+              title="Change Host Name or PIN"
+            >
+              <span>👤</span> Edit Profile / PIN
+            </button>
             <button
               class="btn-primary"
               onclick={() => (isCreateModalOpen = true)}
@@ -3572,6 +3619,99 @@
             >
             <button type="submit" class="btn-primary" disabled={isSubmitting}>
               {isSubmitting ? "Creating..." : "Create Event Space"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- HOST PROFILE & SECURITY MODAL -->
+  {#if isProfileModalOpen}
+    <div
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      onclick={() => (isProfileModalOpen = false)}
+      onkeydown={(e) => {
+        if (e.key === "Escape") isProfileModalOpen = false;
+      }}
+    >
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="modal-card" onclick={(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <h3>👤 Host Profile & Security Settings</h3>
+          <button class="close-btn" onclick={() => (isProfileModalOpen = false)}
+            >&times;</button
+          >
+        </div>
+
+        {#if profileErrorMsg}
+          <div class="alert alert-error" style="margin-bottom: 1rem;">
+            {profileErrorMsg}
+          </div>
+        {/if}
+
+        <form onsubmit={handleSaveProfile} class="form-stack">
+          <div>
+            <label class="form-label" for="editHostName"
+              >Host Name / Role</label
+            >
+            <input
+              id="editHostName"
+              type="text"
+              class="input-field"
+              placeholder="e.g. Pastor John / Media Team"
+              bind:value={editHostName}
+              required
+            />
+            <span class="helper-text"
+              >This name is shown across host controls and management headers.</span
+            >
+          </div>
+
+          <div style="border-top: 1px solid var(--color-border); padding-top: 1rem; margin-top: 0.5rem;">
+            <h4 style="font-size: 0.9375rem; margin-bottom: 0.5rem; font-weight: 600;">Change Admin PIN (Optional)</h4>
+            <div>
+              <label class="form-label" for="currentPin"
+                >Current Admin PIN</label
+              >
+              <input
+                id="currentPin"
+                type="password"
+                class="input-field"
+                placeholder="Enter current PIN"
+                maxlength="8"
+                bind:value={currentPinInput}
+              />
+              <span class="helper-text"
+                >Required only if you are setting a new PIN.</span
+              >
+            </div>
+
+            <div style="margin-top: 0.75rem;">
+              <label class="form-label" for="newPin">New Admin PIN</label>
+              <input
+                id="newPin"
+                type="password"
+                class="input-field"
+                placeholder="Leave blank to keep current PIN"
+                maxlength="8"
+                bind:value={newPinInput}
+              />
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn-secondary"
+              onclick={() => (isProfileModalOpen = false)}>Cancel</button
+            >
+            <button type="submit" class="btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </form>
