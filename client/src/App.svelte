@@ -2472,13 +2472,6 @@
               </button>
             {/if}
             <button
-              class="btn-secondary"
-              onclick={openProfileModal}
-              title="Change Host Name or PIN"
-            >
-              <span>👤</span> Edit Profile / PIN
-            </button>
-            <button
               class="btn-primary"
               onclick={() => (isCreateModalOpen = true)}
             >
