@@ -1,0 +1,32 @@
+{
+  "name": "EventCaps — Memories Shared",
+  "short_name": "EventCaps",
+  "description": "Server-less church and event photo sharing hub",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F9FAFB",
+  "theme_color": "#2563EB",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["photo", "social", "events"],
+  "shortcuts": [
+    {
+      "name": "Live Gallery",
+      "url": "./",
+      "icons": [{ "src": "./icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}
