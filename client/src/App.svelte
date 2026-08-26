@@ -1550,12 +1550,12 @@
             <div class="logo-icon">📸</div>
           {/if}
           <div class="text-left">
-            <h1 class="brand-title">Caps</h1>
+            <h1 class="brand-title">EventCaps</h1>
             <span class="brand-subtitle">
               {#if isGuestRoute && guestEventData}
                 {guestEventData.name}
               {:else}
-                Local Memory Hub
+                Event Photo Hub
               {/if}
             </span>
           </div>
@@ -1619,7 +1619,7 @@
     {#if loading}
       <div class="loading-state">
         <div class="spinner"></div>
-        <p>Connecting to Caps...</p>
+        <p>Connecting to EventCaps...</p>
       </div>
 
       <!-- ========================================== -->
@@ -1630,7 +1630,7 @@
         {#if slideshowPhotos.length === 0}
           <div class="slideshow-empty">
             <div class="slideshow-logo">📸</div>
-            <h1>{guestEventData?.name || "Caps Slideshow"}</h1>
+            <h1>{guestEventData?.name || "EventCaps Slideshow"}</h1>
             {#if guestEventData?.tagline}
               <p class="slideshow-tagline">{guestEventData.tagline}</p>
             {/if}
@@ -2134,7 +2134,7 @@
     {:else if !authStatus.initialized}
       <div class="card auth-card">
         <div class="auth-icon">🚀</div>
-        <h2>Welcome to Caps</h2>
+        <h2>Welcome to EventCaps</h2>
         <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0;">
           Let's set up your host profile. You'll use this PIN to manage your
           events and photo moderation.
@@ -2177,7 +2177,7 @@
             style="width: 100%; margin-top: 0.5rem;"
             disabled={isSubmitting}
           >
-            {isSubmitting ? "Setting up..." : "Start Caps Server"}
+            {isSubmitting ? "Setting up..." : "Start EventCaps"}
           </button>
         </form>
       </div>
@@ -2188,7 +2188,7 @@
         <div class="auth-icon">🔒</div>
         <h2>Host Dashboard Locked</h2>
         <p class="text-secondary" style="margin: 0.5rem 0 1.5rem 0;">
-          Enter your admin PIN to access the Caps management console.
+          Enter your admin PIN to access the EventCaps management console.
         </p>
 
         {#if errorMsg}

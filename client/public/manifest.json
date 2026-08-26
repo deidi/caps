@@ -1,6 +1,6 @@
 {
-  "name": "Caps — Memories Shared",
-  "short_name": "Caps",
+  "name": "EventCaps — Memories Shared",
+  "short_name": "EventCaps",
   "description": "Server-less church and event photo sharing hub",
   "start_url": "./",
   "display": "standalone",

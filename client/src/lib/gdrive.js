@@ -153,7 +153,7 @@ export async function setupEventDriveHierarchy(slug, eventName) {
   const token = getStoredDriveToken();
   if (!token) throw new Error('Not authenticated with Google Drive');
 
-  const rootFolderId = await findOrCreateFolder('Caps Events', 'root');
+  const rootFolderId = await findOrCreateFolder('EventCaps Events', 'root');
   const eventFolderId = await findOrCreateFolder(eventName || slug, rootFolderId);
   const originalsFolderId = await findOrCreateFolder('originals', eventFolderId);
   const thumbnailsFolderId = await findOrCreateFolder('thumbnails', eventFolderId);

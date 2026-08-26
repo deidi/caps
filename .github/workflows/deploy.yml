@@ -1,4 +1,4 @@
-name: Deploy Caps v2 to GitHub Pages
+name: Deploy EventCaps to GitHub Pages
 
 on:
   push:

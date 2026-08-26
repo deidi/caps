@@ -53,7 +53,7 @@ export async function exportFullEventArchive(slug, onProgress = () => {}) {
   // 2. Pack metadata.json
   const metadata = {
     exported_at: new Date().toISOString(),
-    generator: 'Caps v2 Server-less Event Photo Hub',
+    generator: 'EventCaps Server-less Event Photo Hub',
     event,
     guests,
     total_photos: photos.length,
