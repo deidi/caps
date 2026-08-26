@@ -2488,13 +2488,6 @@
               Create your first event space to generate QR codes and start
               receiving memories from attendees.
             </p>
-            <button
-              class="btn-primary"
-              style="margin-top: 1rem;"
-              onclick={() => (isCreateModalOpen = true)}
-            >
-              Create Event
-            </button>
           </div>
         {:else}
           <div class="events-grid" style="margin-top: 1.5rem;">
