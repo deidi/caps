@@ -456,9 +456,16 @@ export function initRealtimeHub(slug, options = {}) {
       const payloadPhotos = [];
       for (const p of approved) {
         let thumbDataUrl = '';
+        let origDataUrl = '';
         if (p.thumb_blob) {
           thumbDataUrl = await blobToBase64(p.thumb_blob);
         }
+        if (p.original_blob && !p.drive_orig_id) {
+          origDataUrl = await blobToBase64(p.original_blob);
+        }
+        const origUrl = p.drive_orig_url || origDataUrl || thumbDataUrl;
+        const thumbUrl = p.drive_thumb_url || p.drive_orig_url || thumbDataUrl || origUrl;
+
         payloadPhotos.push({
           id: p.id,
           hash: p.hash,
@@ -471,30 +478,38 @@ export function initRealtimeHub(slug, options = {}) {
           drive_thumb_id: p.drive_thumb_id,
           drive_orig_url: p.drive_orig_url,
           drive_thumb_url: p.drive_thumb_url,
-          thumb_url: p.drive_thumb_url || p.drive_orig_url || thumbDataUrl,
-          original_url: p.drive_orig_url || '',
+          thumb_url: thumbUrl,
+          original_url: origUrl,
+          thumbnail_path: thumbUrl,
+          original_path: origUrl,
           thumbDataUrl
         });
       }
 
+      const syncMsg = {
+        type: 'gallery:synced',
+        payload: {
+          photos: payloadPhotos,
+          event_settings: event ? {
+            slug: event.slug,
+            name: event.name,
+            date: event.date,
+            tagline: event.tagline,
+            guest_upload_limit: Number(event.guest_upload_limit) || 20,
+            moderation_enabled: Boolean(event.moderation_enabled),
+            status: event.status
+          } : null
+        }
+      };
+
       client.publish(`${topicBase}/broadcast`, JSON.stringify({
         senderId: myClientId,
-        msg: {
-          type: 'gallery:synced',
-          payload: {
-            photos: payloadPhotos,
-            event_settings: event ? {
-              slug: event.slug,
-              name: event.name,
-              date: event.date,
-              tagline: event.tagline,
-              guest_upload_limit: Number(event.guest_upload_limit) || 20,
-              moderation_enabled: Boolean(event.moderation_enabled),
-              status: event.status
-            } : null
-          }
-        }
+        msg: syncMsg
       }));
+
+      if (localChannel) {
+        localChannel.postMessage(syncMsg);
+      }
     } catch (err) {
       console.warn('Failed to broadcast approved gallery:', err);
     }

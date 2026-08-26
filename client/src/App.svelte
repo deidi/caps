@@ -308,16 +308,20 @@
               (p) => (p.hash && p.hash === photo.hash) || p.id === photo.id,
             )
           ) {
-            const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-            const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
-            slideshowPhotos = [
-              ...slideshowPhotos,
-              {
-                ...photo,
-                original_path: thumbUrl,
-                original_url: thumbUrl,
-              },
-            ];
+            const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
+            const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl;
+            if (thumbUrl || origUrl) {
+              slideshowPhotos = [
+                ...slideshowPhotos,
+                {
+                  ...photo,
+                  thumbnail_path: thumbUrl,
+                  thumb_url: thumbUrl,
+                  original_path: origUrl,
+                  original_url: origUrl,
+                },
+              ];
+            }
           }
         }
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
@@ -421,19 +425,22 @@
                 ...liveGalleryPhotos,
                 { ...localMatch, status: "approved" },
               ];
-            } else if (photo.thumbDataUrl) {
-              const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-              const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
-              liveGalleryPhotos = [
-                ...liveGalleryPhotos,
-                {
-                  ...photo,
-                  thumbnail_path: thumbUrl,
-                  thumb_url: thumbUrl,
-                  original_path: thumbUrl,
-                  original_url: thumbUrl,
-                },
-              ];
+            } else {
+              const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
+              const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl;
+              if (thumbUrl || origUrl) {
+                liveGalleryPhotos = [
+                  ...liveGalleryPhotos,
+                  {
+                    ...photo,
+                    status: "approved",
+                    thumbnail_path: thumbUrl,
+                    thumb_url: thumbUrl,
+                    original_path: origUrl,
+                    original_url: origUrl,
+                  },
+                ];
+              }
             }
           }
         }
@@ -471,24 +478,22 @@
                 ...liveGalleryPhotos,
                 { ...localMatch, status: "approved" },
               ];
-            } else if (photo.thumbDataUrl) {
-              const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-              const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
-              liveGalleryPhotos = [
-                ...liveGalleryPhotos,
-                {
-                  ...photo,
-                  thumbnail_path: thumbUrl,
-                  thumb_url: thumbUrl,
-                  original_path: thumbUrl,
-                  original_url: thumbUrl,
-                },
-              ];
             } else {
-              liveGalleryPhotos = [
-                ...liveGalleryPhotos,
-                { ...photo, status: "approved" },
-              ];
+              const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
+              const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl;
+              if (thumbUrl || origUrl) {
+                liveGalleryPhotos = [
+                  ...liveGalleryPhotos,
+                  {
+                    ...photo,
+                    status: "approved",
+                    thumbnail_path: thumbUrl,
+                    thumb_url: thumbUrl,
+                    original_path: origUrl,
+                    original_url: origUrl,
+                  },
+                ];
+              }
             }
           }
         }
