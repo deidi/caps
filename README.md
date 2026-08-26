@@ -112,7 +112,6 @@ To enable 100+ guest cloud uploads directly to your Google Drive:
 3. Set Application type to **Web application**.
 4. Under **Authorized JavaScript origins**, add:
    - `https://deidi.github.io`
-   - `http://localhost:5173` *(for local development)*
 5. Under **APIs & Services > OAuth consent screen** (or [Audience](https://console.cloud.google.com/auth/audience)):
    - Set publishing status to **Production** or add your host Google email under **Test users**.
    - *Note: Do NOT click "Submit for Verification" — verification is not required for personal event hosting on `github.io`.*
@@ -149,29 +148,6 @@ Click the **📊 Analytics** tab inside any event to inspect real-time metrics:
 - **Disk Storage Used**: Total size of event photos in MB.
 - **🏆 Top Guest Contributors**: Ranked leaderboard of guests by upload count.
 - **⏱️ Activity Timeline by Hour**: Interactive bar graph showing photo submissions grouped chronologically.
-
----
-
-## 🚀 Quick Start (Local Development)
-
-Run EventCaps locally without any backend server or database setup:
-
-```bash
-# 1. Install dependencies
-npm.cmd install
-npm.cmd --prefix client install
-
-# 2. Start Vite dev server
-npm.cmd run dev
-```
-
-Open `http://localhost:5173/` in your browser.
-
-To test the production build locally:
-```bash
-npm.cmd run build
-npm.cmd run preview
-```
 
 ---
 
