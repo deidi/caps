@@ -622,18 +622,29 @@
       } else if (msg.type === "photo:removed" || msg.type === "photo:deleted") {
         const removeId = msg.payload?.id;
         const removeHash = msg.payload?.hash;
+        const removeFilename = msg.payload?.filename;
+        const targetSlug = msg.payload?.event_slug || selectedEvent?.slug;
 
         // 1. Remove from Host active UI state
         approvedPhotos = approvedPhotos.filter(
-          (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
+          (p) => (removeId && (p.id == removeId || p.id === removeId)) ||
+                 (removeHash && p.hash && p.hash === removeHash) ||
+                 (removeFilename && p.filename && p.filename === removeFilename)
+                 ? false : true,
         );
         pendingPhotos = pendingPhotos.filter(
-          (p) => (removeId && p.id === removeId) || (removeHash && p.hash === removeHash) ? false : true,
+          (p) => (removeId && (p.id == removeId || p.id === removeId)) ||
+                 (removeHash && p.hash && p.hash === removeHash) ||
+                 (removeFilename && p.filename && p.filename === removeFilename)
+                 ? false : true,
         );
 
         // 2. Remove/mark deleted in Host IndexedDB
         if (removeHash) {
           db.photos.where("hash").equals(removeHash).delete().catch(() => {});
+        }
+        if (removeFilename && targetSlug) {
+          db.photos.where({ event_slug: targetSlug, filename: removeFilename }).delete().catch(() => {});
         }
         if (removeId && !isNaN(parseInt(removeId, 10))) {
           db.photos.delete(parseInt(removeId, 10)).catch(() => {});
@@ -648,6 +659,9 @@
 
         // 4. Update Host events / analytics counters
         loadEvents().catch(() => {});
+        if (selectedEvent?.slug) {
+          loadAnalytics(selectedEvent.slug).catch(() => {});
+        }
 
         // 5. Re-broadcast the updated approved gallery so MQTT retained state & all devices update
         if (wsHandle && typeof wsHandle.broadcastGallery === "function") {
@@ -1570,7 +1584,7 @@
     }
   }
 
-  async function handleDeleteOwnPhoto(photoId) {
+  async function handleDeleteOwnPhoto(photoId, photoObj = null) {
     if (
       !confirm(
         "Remove this photo from the event? Your upload slot will be freed.",
@@ -1578,12 +1592,13 @@
     )
       return;
     try {
-      const deletedPhoto = myUploads.find(p => p.id === photoId) || liveGalleryPhotos.find(p => p.id === photoId);
+      const deletedPhoto = photoObj || myUploads.find(p => p.id === photoId) || liveGalleryPhotos.find(p => p.id === photoId);
       const photoHash = deletedPhoto?.hash;
+      const photoFilename = deletedPhoto?.filename;
       const res = await api.deletePhoto(
         currentEventSlug,
         photoId,
-        guestSession.guest.token,
+        guestSession?.guest?.token,
       );
       myUploads = myUploads.filter((p) => p.id !== photoId && (!photoHash || p.hash !== photoHash));
       liveGalleryPhotos = liveGalleryPhotos.filter((p) => p.id !== photoId && (!photoHash || p.hash !== photoHash));
@@ -1602,6 +1617,7 @@
           payload: {
             id: photoId,
             hash: photoHash,
+            filename: photoFilename,
             event_slug: currentEventSlug,
             guest_token: guestSession?.guest?.token
           }
@@ -2267,7 +2283,7 @@
                       title="Remove photo & free slot"
                       onclick={(e) => {
                         e.stopPropagation();
-                        handleDeleteOwnPhoto(photo.id);
+                        handleDeleteOwnPhoto(photo.id, photo);
                       }}
                     >
                       &times;
@@ -3580,11 +3596,11 @@
 
         <div class="lightbox-footer">
           <div style="display: flex; gap: 0.75rem;">
-            {#if isGuestRoute && guestSession && selectedPreviewPhoto.guest_id === guestSession.guest.id}
+            {#if isGuestRoute && guestSession && (selectedPreviewPhoto.guest_id === guestSession.guest.id || selectedPreviewPhoto.guest_name === guestSession.guest.name)}
               <button
                 class="btn-secondary btn-sm"
                 style="color: var(--color-danger); border-color: var(--color-danger);"
-                onclick={() => handleDeleteOwnPhoto(selectedPreviewPhoto.id)}
+                onclick={() => handleDeleteOwnPhoto(selectedPreviewPhoto.id, selectedPreviewPhoto)}
               >
                 🗑️ Delete Photo
               </button>
