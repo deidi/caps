@@ -242,12 +242,15 @@
         selectedEvent.status = msg.payload.status;
       }
     } else if (msg.type === "event:settings-updated") {
-      if (guestEventData && guestEventData.slug === msg.payload.slug) {
-        if (msg.payload.event_settings) {
-          guestEventData = { ...guestEventData, ...msg.payload.event_settings };
+      const targetSlug = msg.payload.slug || (guestEventData && guestEventData.slug) || (selectedEvent && selectedEvent.slug);
+      if (msg.payload.event_settings) {
+        const settings = msg.payload.event_settings;
+        if (guestEventData && (!msg.payload.slug || guestEventData.slug === msg.payload.slug)) {
+          guestEventData = { ...guestEventData, ...settings };
           if (guestSession) {
-            const limit = Number(msg.payload.event_settings.guest_upload_limit) || 20;
-            const used = Number(guestSession.guest.upload_count) || 0;
+            const limit = Number(settings.guest_upload_limit) || 20;
+            const used = Number(guestSession.guest?.upload_count) || 0;
+            guestSession.event = { ...guestSession.event, ...settings };
             guestSession.quota = {
               used,
               limit,
@@ -255,10 +258,16 @@
             };
           }
         }
-      }
-      if (selectedEvent && selectedEvent.slug === msg.payload.slug) {
-        if (msg.payload.event_settings) {
-          selectedEvent = { ...selectedEvent, ...msg.payload.event_settings };
+        if (selectedEvent && (!msg.payload.slug || selectedEvent.slug === msg.payload.slug)) {
+          selectedEvent = { ...selectedEvent, ...settings };
+        }
+        if (targetSlug) {
+          db.events.where("slug").equals(targetSlug).modify({
+            guest_upload_limit: Number(settings.guest_upload_limit) || 20,
+            moderation_enabled: Boolean(settings.moderation_enabled),
+            name: settings.name,
+            tagline: settings.tagline
+          }).catch(() => {});
         }
       }
     } else if (msg.type === "event:deleted") {
@@ -374,6 +383,31 @@
           );
         }
       } else if (msg.type === "gallery:synced") {
+        if (msg.payload.event_settings) {
+          const settings = msg.payload.event_settings;
+          if (guestEventData) {
+            guestEventData = { ...guestEventData, ...settings };
+          }
+          if (guestSession) {
+            const limit = Number(settings.guest_upload_limit) || 20;
+            const used = Number(guestSession.guest?.upload_count) || 0;
+            guestSession.event = { ...guestSession.event, ...settings };
+            guestSession.quota = {
+              used,
+              limit,
+              remaining: Math.max(0, limit - used),
+            };
+          }
+          if (currentEventSlug) {
+            db.events.where("slug").equals(currentEventSlug).modify({
+              guest_upload_limit: Number(settings.guest_upload_limit) || 20,
+              moderation_enabled: Boolean(settings.moderation_enabled),
+              name: settings.name,
+              tagline: settings.tagline
+            }).catch(() => {});
+          }
+        }
+
         const syncedPhotos = msg.payload.photos || [];
         for (const photo of syncedPhotos) {
           if (

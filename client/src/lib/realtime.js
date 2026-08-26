@@ -481,7 +481,18 @@ export function initRealtimeHub(slug, options = {}) {
         senderId: myClientId,
         msg: {
           type: 'gallery:synced',
-          payload: { photos: payloadPhotos }
+          payload: {
+            photos: payloadPhotos,
+            event_settings: event ? {
+              slug: event.slug,
+              name: event.name,
+              date: event.date,
+              tagline: event.tagline,
+              guest_upload_limit: Number(event.guest_upload_limit) || 20,
+              moderation_enabled: Boolean(event.moderation_enabled),
+              status: event.status
+            } : null
+          }
         }
       }));
     } catch (err) {
