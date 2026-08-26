@@ -46,63 +46,6 @@
 
 ---
 
----
-
-## 🌐 GitHub Pages Deployment Guide
-
-EventCaps is designed to be deployed and hosted **100% free on GitHub Pages** with zero backend infrastructure.
-
-### ⚙️ Option A: Automated CI/CD (GitHub Actions) — Recommended
-
-The repository includes a two-stage GitHub Actions workflow (`.github/workflows/deploy.yml`) that automatically builds and deploys your site whenever you push to the `main` branch.
-
-#### 1. Enable GitHub Actions Deployment in Repo Settings
-1. Open your repository on GitHub: **[https://github.com/deidi/event-caps/settings/pages](https://github.com/deidi/event-caps/settings/pages)**
-2. Under **Build and deployment > Source**, choose:
-   - **`GitHub Actions`** (Native Artifacts Deployment)
-3. Push any commit to `main`, and the deployment job will trigger automatically.
-4. Monitor build progress at: **[https://github.com/deidi/event-caps/actions](https://github.com/deidi/event-caps/actions)**
-
----
-
-### 💻 Option B: One-Command Manual Deployment to `gh-pages`
-
-If you prefer to deploy directly from your local development machine without waiting for GitHub Actions:
-
-```powershell
-# Run from repository root in PowerShell:
-npm.cmd --prefix client run build
-Copy-Item "client\dist\index.html" "client\dist\404.html" -Force
-New-Item -Path "client\dist\.nojekyll" -ItemType File -Force
-Push-Location "client\dist"
-git init
-git checkout -B gh-pages
-git add -A
-git commit -m "deploy: manual live production release"
-git remote add origin https://github.com/deidi/event-caps.git
-git push origin gh-pages -f
-Pop-Location
-Remove-Item -Path "client\dist\.git" -Recurse -Force -ErrorAction SilentlyContinue
-```
-
-*(If using this method, ensure your GitHub Pages Source is set to **`Deploy from a branch`** &rarr; **`gh-pages`** in repo settings).*
-
----
-
-### 🛠️ Key Deployment Files & Mechanisms
-
-- **`.github/workflows/deploy.yml`**: Two-stage GitHub Actions pipeline (`build` &rarr; `deploy`) that compiles Svelte, bundles Vite assets, and uploads the deployment artifact directly.
-- **`client/dist/404.html`**: A copy of `index.html` ensuring that direct links to sub-routes (e.g. `#/event/my-event` or `#/privacy`) load properly without HTTP 404 errors on GitHub's static servers.
-- **`client/dist/.nojekyll`**: Disables GitHub's default Jekyll static processor so that files starting with `_` or nested Vite assets are served correctly.
-- **`client/public/sw.js`**: Service Worker with network-first `no-store` handling for app scripts, ensuring users receive instant updates on page load without stale cache locks.
-
----
-
-### 🔗 Live Production URL
-👉 **[https://deidi.github.io/event-caps/#/](https://deidi.github.io/event-caps/#/)**
-
----
-
 ## 🔑 Google Cloud Drive Setup (For Event Hosts)
 
 To enable 100+ guest cloud uploads directly to your Google Drive:
@@ -152,4 +95,4 @@ Click the **📊 Analytics** tab inside any event to inspect real-time metrics:
 ---
 
 ## 📄 License & Credits
-Developed with ❤️ by NCCF Media Team & Open Source Community. Released under the MIT License.
+Developed with ❤️ by deidi & Open Source Community. Released under the MIT License.
