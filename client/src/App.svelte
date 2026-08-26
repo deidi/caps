@@ -326,7 +326,7 @@
         const photo = msg.payload;
         // 1. Update status in myUploads
         myUploads = myUploads.map((p) =>
-          (p.hash === photo.hash || p.id === photo.id)
+          ((p.hash && p.hash === photo.hash) || p.id === photo.id || p.filename === photo.filename)
             ? { ...p, status: "approved" }
             : p,
         );
@@ -340,25 +340,23 @@
             .catch(() => {});
         }
 
-        // 3. Find or construct the photo object with valid local Object URL
-        const localMatch = myUploads.find((p) => p.hash === photo.hash);
-        let galleryItem = null;
+        // 3. Find or construct the photo object with valid image URL
+        const localMatch = myUploads.find((p) => (p.hash && p.hash === photo.hash) || p.id === photo.id || p.filename === photo.filename);
+        const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (localMatch ? localMatch.thumb_url : "");
+        const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl || (localMatch ? localMatch.original_url : "");
 
+        let galleryItem = null;
         if (localMatch) {
-          galleryItem = { ...localMatch, status: "approved" };
-        } else if (photo.thumbDataUrl) {
-          const thumbBlob = base64ToBlob(photo.thumbDataUrl);
-          const thumbUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : "";
+          galleryItem = { ...localMatch, status: "approved", thumb_url: thumbUrl || localMatch.thumb_url, original_url: origUrl || localMatch.original_url, thumbnail_path: thumbUrl || localMatch.thumbnail_path, original_path: origUrl || localMatch.original_path };
+        } else {
           galleryItem = {
             ...photo,
             status: "approved",
             thumb_url: thumbUrl,
-            original_url: thumbUrl,
+            original_url: origUrl,
             thumbnail_path: thumbUrl,
-            original_path: thumbUrl,
+            original_path: origUrl,
           };
-        } else {
-          galleryItem = { ...photo, status: "approved" };
         }
 
         // 4. Update liveGalleryPhotos reactively
@@ -370,7 +368,7 @@
           liveGalleryPhotos = [galleryItem, ...liveGalleryPhotos];
         } else {
           liveGalleryPhotos = liveGalleryPhotos.map((p) =>
-            (p.hash === photo.hash || p.id === photo.id)
+            ((p.hash && p.hash === photo.hash) || p.id === photo.id)
               ? { ...p, ...galleryItem, status: "approved" }
               : p,
           );
