@@ -46,6 +46,35 @@
 
 ---
 
+## ➕ How to Create an Event
+
+Creating a new event space takes under 30 seconds:
+
+1. **Access the Host Dashboard**:
+   - Open **[https://deidi.github.io/event-caps/#/](https://deidi.github.io/event-caps/#/)** on your computer or smartphone.
+   - Enter your **Host Name & PIN** on first setup (or enter your 4-digit PIN to unlock).
+
+2. **Click `+ Create New Event`**:
+   - Click the primary **`+ Create New Event`** button on your dashboard toolbar.
+
+3. **Configure Your Event Space**:
+   - **Event Name**: The title of your gathering (e.g. `Annual Gala 2026`, `Emma & David's Wedding`, `Sunday Worship`).
+   - **Date**: The scheduled date for the event.
+   - **Tagline / Message** *(Optional)*: A custom welcome message shown on guest capture screens and the live slideshow.
+   - **Per-Guest Upload Limit**: Set maximum photos allowed per guest (e.g. `5`, `10`, or `20` photos).
+   - **Photo Moderation Queue**:
+     - *Enabled (Recommended)*: Photos require host approval in the moderation queue before appearing on the public live wall or TV slideshow.
+     - *Disabled*: Uploads stream live instantly to all screens without review.
+   - **Strip EXIF Metadata**: Automatically strips GPS location coordinates and device information for attendee privacy.
+
+4. **Launch & Share with Guests**:
+   - Click **Create Event Space**.
+   - In your newly created event, click **`📱 QR Code`** to:
+     - Project fullscreen on venue TV screens (**`📺 Full-Screen TV Mode`**).
+     - Download the QR code image (**`💾 Download PNG`**) to print on table cards or posters.
+
+---
+
 ## 📱 How to Use During an Event
 
 | Role / Device | URL | Instructions |
