@@ -1113,10 +1113,10 @@
   // --- GOOGLE DRIVE 1-CLICK OAUTH & ZIP EXPORTS ---
   let isDriveModalOpen = $state(false);
   let gdriveClientId = $state(
-    localStorage.getItem("caps_gdrive_client_id") || "",
+    gdrive.getEffectiveClientId(),
   );
   let gdriveClientIdInput = $state(
-    localStorage.getItem("caps_gdrive_client_id") || "",
+    gdrive.getEffectiveClientId(),
   );
   let isDriveConnected = $state(Boolean(gdrive.isDriveConnected()));
   let isConnectingDrive = $state(false);
@@ -1124,9 +1124,9 @@
   let driveSyncProgress = $state("");
   let driveEventFolderUrl = $state("");
 
-  async function handleConnectGoogleDrive() {
-    let clientId = (gdriveClientIdInput || gdriveClientId || "").trim();
-    if (!clientId) {
+  async function handleConnectGoogleDrive(forceModal = false) {
+    let clientId = gdrive.getEffectiveClientId(gdriveClientIdInput || gdriveClientId);
+    if (!clientId || forceModal) {
       isDriveModalOpen = true;
       return;
     }
@@ -2703,17 +2703,18 @@
             {:else}
               <button
                 class="btn-primary"
-                onclick={() => (isDriveModalOpen = true)}
+                onclick={() => handleConnectGoogleDrive()}
+                disabled={isConnectingDrive}
                 title="Connect your Google Drive to host photos for 100+ guests"
               >
-                <span>🔗</span> 1-Click Connect Google Drive
+                <span>🔗</span> {isConnectingDrive ? "Connecting..." : "1-Click Connect Google Drive"}
               </button>
             {/if}
             <button
               class="btn-primary"
               onclick={() => {
                 if (!isDriveConnected) {
-                  isDriveModalOpen = true;
+                  handleConnectGoogleDrive();
                 } else {
                   isCreateModalOpen = true;
                 }
@@ -2739,9 +2740,10 @@
               <button
                 class="btn-primary"
                 style="background: #2563eb; border-color: #2563eb; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700; white-space: nowrap;"
-                onclick={() => (isDriveModalOpen = true)}
+                onclick={() => handleConnectGoogleDrive()}
+                disabled={isConnectingDrive}
               >
-                <span>🔗</span> 1-Click Connect Drive
+                <span>🔗</span> {isConnectingDrive ? "Connecting..." : "1-Click Connect Drive"}
               </button>
             </div>
           </div>

@@ -46,6 +46,15 @@ export function disconnectGoogleDrive() {
 }
 
 /**
+ * Default & Effective Google OAuth 2.0 Client ID
+ */
+export const DEFAULT_CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '').trim();
+
+export function getEffectiveClientId(customClientId = '') {
+  return (customClientId || localStorage.getItem('caps_gdrive_client_id') || DEFAULT_CLIENT_ID || '').trim();
+}
+
+/**
  * 1-Click Google Identity Services (GIS) Token Request
  */
 export function requestGoogleDriveAuth(clientId) {
@@ -54,7 +63,7 @@ export function requestGoogleDriveAuth(clientId) {
       return reject(new Error('Google Identity Services SDK not loaded. Please check your internet connection.'));
     }
 
-    const effectiveClientId = (clientId || localStorage.getItem('caps_gdrive_client_id') || '').trim();
+    const effectiveClientId = getEffectiveClientId(clientId);
     if (!effectiveClientId) {
       return reject(new Error('Google OAuth Client ID is required to authorize Google Drive.'));
     }
