@@ -48,7 +48,10 @@ export function disconnectGoogleDrive() {
 /**
  * Default & Effective Google OAuth 2.0 Client ID
  */
-export const DEFAULT_CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '').trim();
+export const DEFAULT_CLIENT_ID = (
+  import.meta.env?.VITE_GOOGLE_CLIENT_ID ||
+  '700313355661-vsirghf2mqccdoehfij937lp0nnuqlok.apps.googleusercontent.com'
+).trim();
 
 export function getEffectiveClientId(customClientId = '') {
   return (customClientId || localStorage.getItem('caps_gdrive_client_id') || DEFAULT_CLIENT_ID || '').trim();
