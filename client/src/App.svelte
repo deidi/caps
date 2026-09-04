@@ -351,13 +351,15 @@
               (p) => (p.hash && p.hash === photo.hash) || (p.id && p.id === photo.id),
             )
           ) {
-            const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
-            const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl;
-            if (thumbUrl || origUrl) {
+            const origUrl = getPhotoSrc(photo, false);
+            const thumbUrl = getPhotoSrc(photo, true);
+            if (origUrl || thumbUrl) {
               slideshowPhotos = [
                 ...slideshowPhotos,
                 {
                   ...photo,
+                  storage_orig_url: photo.storage_orig_url || origUrl,
+                  storage_thumb_url: photo.storage_thumb_url || thumbUrl,
                   thumbnail_path: thumbUrl,
                   thumb_url: thumbUrl,
                   original_path: origUrl,
@@ -477,14 +479,16 @@
                 { ...localMatch, status: "approved" },
               ];
             } else {
-              const thumbUrl = photo.thumb_url || photo.drive_thumb_url || photo.original_url || photo.drive_orig_url || (photo.thumbDataUrl ? URL.createObjectURL(base64ToBlob(photo.thumbDataUrl)) : "");
-              const origUrl = photo.original_url || photo.drive_orig_url || thumbUrl;
+              const origUrl = getPhotoSrc(photo, false);
+              const thumbUrl = getPhotoSrc(photo, true);
               if (thumbUrl || origUrl) {
                 liveGalleryPhotos = [
                   ...liveGalleryPhotos,
                   {
                     ...photo,
                     status: "approved",
+                    storage_orig_url: photo.storage_orig_url || origUrl,
+                    storage_thumb_url: photo.storage_thumb_url || thumbUrl,
                     thumbnail_path: thumbUrl,
                     thumb_url: thumbUrl,
                     original_path: origUrl,
@@ -958,6 +962,12 @@
               status: "approved",
               created_at: approvedItem.created_at,
               filename: approvedItem.filename,
+              storage_orig_url: approvedItem.storage_orig_url,
+              storage_thumb_url: approvedItem.storage_thumb_url,
+              original_url: approvedItem.original_url || approvedItem.storage_orig_url,
+              thumb_url: approvedItem.thumb_url || approvedItem.storage_thumb_url,
+              original_path: approvedItem.original_path || approvedItem.storage_orig_url,
+              thumbnail_path: approvedItem.thumbnail_path || approvedItem.storage_thumb_url,
               thumbDataUrl,
             },
           });
@@ -1135,6 +1145,12 @@
         newlyApproved.push({
           ...p,
           status: "approved",
+          storage_orig_url: p.storage_orig_url,
+          storage_thumb_url: p.storage_thumb_url,
+          original_url: p.original_url || p.storage_orig_url,
+          thumb_url: p.thumb_url || p.storage_thumb_url,
+          original_path: p.original_path || p.storage_orig_url,
+          thumbnail_path: p.thumbnail_path || p.storage_thumb_url,
           thumbDataUrl,
         });
       }

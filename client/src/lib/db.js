@@ -620,9 +620,10 @@ export async function getPhotos(slug, options = {}) {
   photos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
   const result = photos.map(p => {
-    const origUrl = p.original_blob ? getCachedObjectURL(p.original_blob, `orig_${p.id}`) : (p.drive_orig_url || '');
-    const thumbUrl = p.thumb_blob ? getCachedObjectURL(p.thumb_blob, `thumb_${p.id}`) : (p.drive_thumb_url || origUrl);
+    const origUrl = p.storage_orig_url || (p.original_blob ? getCachedObjectURL(p.original_blob, `orig_${p.id}`) : '') || p.original_url || p.original_path || p.drive_orig_url || '';
+    const thumbUrl = p.storage_thumb_url || (p.thumb_blob ? getCachedObjectURL(p.thumb_blob, `thumb_${p.id}`) : '') || p.thumb_url || p.thumbnail_path || p.drive_thumb_url || origUrl;
     return {
+      ...p,
       id: p.id,
       event_slug: p.event_slug,
       guest_id: p.guest_id,
@@ -633,6 +634,10 @@ export async function getPhotos(slug, options = {}) {
       width: p.width,
       height: p.height,
       size: p.size,
+      storage_orig_path: p.storage_orig_path || '',
+      storage_thumb_path: p.storage_thumb_path || '',
+      storage_orig_url: p.storage_orig_url || origUrl,
+      storage_thumb_url: p.storage_thumb_url || thumbUrl,
       drive_orig_id: p.drive_orig_id,
       drive_thumb_id: p.drive_thumb_id,
       drive_orig_url: p.drive_orig_url,
