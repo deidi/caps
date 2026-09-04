@@ -2054,19 +2054,6 @@
           {/if}
 
           {#if !isGuestRoute && authStatus.is_authenticated}
-            {#if isDriveConnected}
-              <span class="status-pill pill-approved" style="font-size: 0.8125rem;">
-                ☁️ Google Drive Connected
-              </span>
-            {:else}
-              <button
-                class="btn-secondary btn-sm"
-                onclick={handleConnectGoogleDrive}
-                title="Connect Google Drive to store event photos"
-              >
-                <span>☁️</span> Connect Google Drive
-              </button>
-            {/if}
             <button
               class="btn-secondary btn-sm host-badge"
               onclick={openProfileModal}
