@@ -934,6 +934,39 @@
             },
           });
         }
+
+        // Asynchronously ensure photo is uploaded to Google Drive if connected
+        if (gdrive.isDriveConnected() && selectedEvent) {
+          gdrive.setupEventDriveHierarchy(selectedEvent.slug, selectedEvent.name).then(async ({ originalsFolderId, thumbnailsFolderId }) => {
+            const dbRecord = await db.photos.get(photoId);
+            if (!dbRecord) return;
+            let driveOrigId = dbRecord.drive_orig_id;
+            let driveThumbId = dbRecord.drive_thumb_id;
+
+            if (!driveOrigId && dbRecord.original_blob) {
+              const up = await gdrive.uploadBlobToDrive(originalsFolderId, dbRecord.filename, dbRecord.original_blob, dbRecord.mime_type || 'image/jpeg');
+              driveOrigId = up.id;
+            }
+            if (!driveThumbId && dbRecord.thumb_blob) {
+              const upThumb = await gdrive.uploadBlobToDrive(thumbnailsFolderId, `thumb_${dbRecord.filename}`, dbRecord.thumb_blob, 'image/jpeg');
+              driveThumbId = upThumb.id;
+            }
+
+            if (driveOrigId || driveThumbId) {
+              const driveOrigUrl = driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '';
+              const driveThumbUrl = driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
+              await db.photos.update(photoId, {
+                drive_orig_id: driveOrigId,
+                drive_thumb_id: driveThumbId,
+                drive_orig_url: driveOrigUrl,
+                drive_thumb_url: driveThumbUrl
+              });
+              if (wsHandle && typeof wsHandle.broadcastGallery === 'function') {
+                wsHandle.broadcastGallery();
+              }
+            }
+          }).catch(err => console.warn('Drive auto-upload on approve error:', err));
+        }
       }
       await loadEvents();
     } catch (err) {
@@ -1085,6 +1118,43 @@
           payload: { photos: newlyApproved },
         });
       }
+
+      // Background auto-upload approved photos to Google Drive
+      if (gdrive.isDriveConnected() && selectedEvent) {
+        gdrive.setupEventDriveHierarchy(selectedEvent.slug, selectedEvent.name).then(async ({ originalsFolderId, thumbnailsFolderId }) => {
+          for (const id of ids) {
+            try {
+              const dbRecord = await db.photos.get(id);
+              if (!dbRecord) continue;
+              let driveOrigId = dbRecord.drive_orig_id;
+              let driveThumbId = dbRecord.drive_thumb_id;
+
+              if (!driveOrigId && dbRecord.original_blob) {
+                const up = await gdrive.uploadBlobToDrive(originalsFolderId, dbRecord.filename, dbRecord.original_blob, dbRecord.mime_type || 'image/jpeg');
+                driveOrigId = up.id;
+              }
+              if (!driveThumbId && dbRecord.thumb_blob) {
+                const upThumb = await gdrive.uploadBlobToDrive(thumbnailsFolderId, `thumb_${dbRecord.filename}`, dbRecord.thumb_blob, 'image/jpeg');
+                driveThumbId = upThumb.id;
+              }
+
+              if (driveOrigId || driveThumbId) {
+                await db.photos.update(id, {
+                  drive_orig_id: driveOrigId,
+                  drive_thumb_id: driveThumbId,
+                  drive_orig_url: driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '',
+                  drive_thumb_url: driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : ''
+                });
+              }
+            } catch (err) {
+              console.warn(`Bulk drive upload failed for photo ${id}:`, err);
+            }
+          }
+          if (wsHandle && typeof wsHandle.broadcastGallery === 'function') {
+            wsHandle.broadcastGallery();
+          }
+        }).catch(err => console.warn('Could not setup Drive hierarchy during bulk approve:', err));
+      }      
       await loadEvents();
     } catch (err) {
       alert("Failed to bulk approve: " + err.message);
@@ -1544,8 +1614,56 @@
           if (res.processed) {
             let cloudUploaded = false;
 
-            // 1. Google Drive Direct Resumable Upload (via Host OAuth Session)
-            if (wsHandle) {
+            // 1. Direct Google Drive upload if this browser has Google Drive connected
+            if (gdrive.isDriveConnected()) {
+              try {
+                uploadProgressText = `Uploading photo ${i + 1} of ${files.length} to Google Drive...`;
+                const { originalsFolderId, thumbnailsFolderId } = await gdrive.setupEventDriveHierarchy(
+                  currentEventSlug,
+                  guestEventData?.name || currentEventSlug
+                );
+                const [origResult, thumbResult] = await Promise.all([
+                  gdrive.uploadBlobToDrive(originalsFolderId, res.processed.filename, res.processed.originalBlob, res.processed.mimeType),
+                  gdrive.uploadBlobToDrive(thumbnailsFolderId, `thumb_${res.processed.filename}`, res.processed.thumbBlob, 'image/jpeg')
+                ]);
+
+                const driveOrigId = origResult?.id || '';
+                const driveThumbId = thumbResult?.id || '';
+                const driveOrigUrl = driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '';
+                const driveThumbUrl = driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
+
+                // Update guest local record with cloud CDN URLs
+                await db.photos.update(res.photo.id, {
+                  drive_orig_id: driveOrigId,
+                  drive_thumb_id: driveThumbId,
+                  drive_orig_url: driveOrigUrl,
+                  drive_thumb_url: driveThumbUrl
+                });
+
+                if (wsHandle) {
+                  wsHandle.notifyGDrivePhotoUploaded({
+                    driveOrigId,
+                    driveThumbId,
+                    driveOrigUrl,
+                    driveThumbUrl,
+                    filename: res.processed.filename,
+                    hash: res.processed.hash,
+                    width: res.processed.width,
+                    height: res.processed.height,
+                    size: res.processed.size,
+                    mimeType: res.processed.mimeType,
+                    guest_name: guestSession.guest.name,
+                    guest_token: guestSession.guest.token
+                  });
+                }
+                cloudUploaded = true;
+              } catch (directDriveErr) {
+                console.warn('Direct Google Drive upload on connected client failed, attempting relay:', directDriveErr);
+              }
+            }
+
+            // 2. Google Drive Direct Resumable Upload (via Host OAuth Session for remote guests)
+            if (!cloudUploaded && wsHandle) {
               try {
                 uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
                 const session = await wsHandle.requestGDriveUploadSession(

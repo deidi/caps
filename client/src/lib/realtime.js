@@ -433,6 +433,27 @@ export function initRealtimeHub(slug, options = {}) {
         payload: formattedPhoto
       });
 
+      // Background auto-upload to Google Drive if Host has Google Drive connected
+      if (getStoredDriveToken() && thumbBlob) {
+        setupEventDriveHierarchy(slug, event?.name || slug).then(async ({ thumbnailsFolderId }) => {
+          try {
+            const up = await uploadBlobToDrive(thumbnailsFolderId, `thumb_${filename || Date.now()}.jpg`, thumbBlob, 'image/jpeg');
+            if (up?.id) {
+              const driveThumbUrl = getDriveThumbnailUrl(up.id, 400);
+              await db.photos.update(id, {
+                drive_thumb_id: up.id,
+                drive_thumb_url: driveThumbUrl
+              });
+              if (initialStatus === 'approved') {
+                broadcastApprovedGallery();
+              }
+            }
+          } catch (e) {
+            console.warn('Background Drive upload for incoming photo failed:', e);
+          }
+        }).catch(err => console.warn('Could not setup Drive hierarchy:', err));
+      }
+
       if (initialStatus === 'approved') {
         broadcastApprovedGallery();
       }
