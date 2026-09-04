@@ -1110,68 +1110,35 @@
     }
   }
 
-  // --- GOOGLE DRIVE CLOUD STORAGE & ZIP EXPORTS ---
+  // --- GOOGLE DRIVE 1-CLICK OAUTH & ZIP EXPORTS ---
   let isDriveModalOpen = $state(false);
-  let driveModalTab = $state("webapp"); // "webapp" | "oauth"
-  let gdriveWebAppUrl = $state(gdrive.getStoredDriveWebAppUrl());
-  let gdriveWebAppUrlInput = $state(gdrive.getStoredDriveWebAppUrl());
-  let isTestingDriveWebApp = $state(false);
-  let scriptCopied = $state(false);
   let gdriveClientId = $state(
     localStorage.getItem("caps_gdrive_client_id") || "",
   );
+  let gdriveClientIdInput = $state(
+    localStorage.getItem("caps_gdrive_client_id") || "",
+  );
   let isDriveConnected = $state(Boolean(gdrive.isDriveConnected()));
+  let isConnectingDrive = $state(false);
   let isSyncingDrive = $state(false);
   let driveSyncProgress = $state("");
   let driveEventFolderUrl = $state("");
 
-  function handleCopyAppsScript() {
-    const code = gdrive.getAppsScriptTemplateCode();
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(code);
-    }
-    scriptCopied = true;
-    setTimeout(() => (scriptCopied = false), 3500);
-  }
-
-  async function handleSaveDriveWebApp() {
-    if (!gdriveWebAppUrlInput.trim()) return;
-    isTestingDriveWebApp = true;
-    try {
-      await gdrive.testDriveWebApp(gdriveWebAppUrlInput.trim());
-      gdrive.setStoredDriveWebAppUrl(gdriveWebAppUrlInput.trim());
-      gdriveWebAppUrl = gdriveWebAppUrlInput.trim();
-      isDriveConnected = true;
-      successMsg = "⚡ Google Drive Cloud Receiver connected! 100+ guest uploads ready.";
-      setTimeout(() => (successMsg = ""), 4500);
-      isDriveModalOpen = false;
-
-      // Broadcast gallery settings so all connected devices know the cloud endpoint
-      if (wsHandle && typeof wsHandle.broadcastGallery === "function") {
-        wsHandle.broadcastGallery();
-      }
-    } catch (err) {
-      alert("Could not connect to Google Apps Script: " + err.message + "\n\nPlease ensure you deployed as 'Web app' with 'Who has access: Anyone'.");
-    } finally {
-      isTestingDriveWebApp = false;
-    }
-  }
-
   async function handleConnectGoogleDrive() {
-    let clientId = gdriveClientId.trim();
+    let clientId = (gdriveClientIdInput || gdriveClientId || "").trim();
     if (!clientId) {
-      const inputId = prompt(
-        "Enter your Google OAuth 2.0 Client ID (from Google Cloud Console):",
-        "",
-      );
-      if (!inputId || !inputId.trim()) return;
-      clientId = inputId.trim();
-      gdriveClientId = clientId;
-      localStorage.setItem("caps_gdrive_client_id", clientId);
+      isDriveModalOpen = true;
+      return;
     }
+    isConnectingDrive = true;
+    errorMsg = "";
     try {
+      localStorage.setItem("caps_gdrive_client_id", clientId);
+      gdriveClientId = clientId;
       await gdrive.requestGoogleDriveAuth(clientId);
       isDriveConnected = true;
+      isDriveModalOpen = false;
+
       if (selectedEvent) {
         try {
           const hierarchy = await gdrive.setupEventDriveHierarchy(selectedEvent.slug, selectedEvent.name);
@@ -1180,18 +1147,23 @@
           console.warn("Could not pre-initialize Drive hierarchy:", e);
         }
       }
-      successMsg = "Connected to Google Drive! Direct 100+ guest uploads active.";
-      setTimeout(() => (successMsg = ""), 4000);
-      isDriveModalOpen = false;
+
+      successMsg = "☁️ Google Drive connected successfully! Ready to create and host events.";
+      setTimeout(() => (successMsg = ""), 4500);
+
+      // Broadcast gallery to active peers
+      if (wsHandle && typeof wsHandle.broadcastGallery === "function") {
+        wsHandle.broadcastGallery();
+      }
     } catch (err) {
-      alert("Google Drive connection failed: " + err.message);
+      alert("Google Drive authorization failed: " + err.message);
+    } finally {
+      isConnectingDrive = false;
     }
   }
 
   function handleDisconnectGoogleDrive() {
     gdrive.disconnectGoogleDrive();
-    gdriveWebAppUrl = "";
-    gdriveWebAppUrlInput = "";
     isDriveConnected = false;
     driveEventFolderUrl = "";
     successMsg = "Disconnected from Google Drive.";
@@ -1572,53 +1544,8 @@
           if (res.processed) {
             let cloudUploaded = false;
 
-            // 1. Direct 1-Shot Google Drive Web App Upload (Recommended for 100+ guests)
-            const activeWebAppUrl = guestEventData?.gdrive_webapp_url || gdriveWebAppUrl || gdrive.getStoredDriveWebAppUrl();
-            if (activeWebAppUrl) {
-              try {
-                uploadProgressText = `Uploading photo ${i + 1} of ${files.length} to Google Drive...`;
-                const driveResult = await gdrive.uploadPhotoToDriveWebApp(activeWebAppUrl, {
-                  eventName: guestEventData?.name || currentEventSlug,
-                  fileName: res.processed.filename,
-                  origBlob: res.processed.originalBlob,
-                  thumbBlob: res.processed.thumbBlob,
-                  mimeType: res.processed.mimeType
-                });
-
-                if (driveResult && driveResult.driveOrigId) {
-                  // Update local guest DB with cloud CDN URLs
-                  await db.photos.update(res.photo.id, {
-                    drive_orig_id: driveResult.driveOrigId,
-                    drive_thumb_id: driveResult.driveThumbId,
-                    drive_orig_url: driveResult.driveOrigUrl,
-                    drive_thumb_url: driveResult.driveThumbUrl
-                  });
-
-                  if (wsHandle) {
-                    wsHandle.notifyGDrivePhotoUploaded({
-                      driveOrigId: driveResult.driveOrigId,
-                      driveThumbId: driveResult.driveThumbId,
-                      driveOrigUrl: driveResult.driveOrigUrl,
-                      driveThumbUrl: driveResult.driveThumbUrl,
-                      filename: res.processed.filename,
-                      hash: res.processed.hash,
-                      width: res.processed.width,
-                      height: res.processed.height,
-                      size: res.processed.size,
-                      mimeType: res.processed.mimeType,
-                      guest_name: guestSession.guest.name,
-                      guest_token: guestSession.guest.token
-                    });
-                  }
-                  cloudUploaded = true;
-                }
-              } catch (webAppErr) {
-                console.warn('Direct Google Drive Web App upload error:', webAppErr);
-              }
-            }
-
-            // 2. Resumable Session via Host MQTT Coordination
-            if (!cloudUploaded && wsHandle) {
+            // 1. Google Drive Direct Resumable Upload (via Host OAuth Session)
+            if (wsHandle) {
               try {
                 uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
                 const session = await wsHandle.requestGDriveUploadSession(
@@ -1635,32 +1562,7 @@
                   }
                 );
 
-                if (session && session.webAppUrl) {
-                  const driveResult = await gdrive.uploadPhotoToDriveWebApp(session.webAppUrl, {
-                    eventName: session.eventName || guestEventData?.name || currentEventSlug,
-                    fileName: res.processed.filename,
-                    origBlob: res.processed.originalBlob,
-                    thumbBlob: res.processed.thumbBlob,
-                    mimeType: res.processed.mimeType
-                  });
-                  if (driveResult && driveResult.driveOrigId) {
-                    wsHandle.notifyGDrivePhotoUploaded({
-                      driveOrigId: driveResult.driveOrigId,
-                      driveThumbId: driveResult.driveThumbId,
-                      driveOrigUrl: driveResult.driveOrigUrl,
-                      driveThumbUrl: driveResult.driveThumbUrl,
-                      filename: res.processed.filename,
-                      hash: res.processed.hash,
-                      width: res.processed.width,
-                      height: res.processed.height,
-                      size: res.processed.size,
-                      mimeType: res.processed.mimeType,
-                      guest_name: guestSession.guest.name,
-                      guest_token: guestSession.guest.token
-                    });
-                    cloudUploaded = true;
-                  }
-                } else if (session && session.origUploadUri && session.thumbUploadUri) {
+                if (session && session.origUploadUri && session.thumbUploadUri) {
                   uploadProgressText = `Streaming photo ${i + 1} of ${files.length} to Google Drive...`;
                   const [origResult, thumbResult] = await Promise.all([
                     gdrive.uploadBlobToResumableSession(
@@ -1675,9 +1577,24 @@
                     )
                   ]);
 
+                  const driveOrigId = origResult?.id || '';
+                  const driveThumbId = thumbResult?.id || '';
+                  const driveOrigUrl = driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '';
+                  const driveThumbUrl = driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
+
+                  // Update guest local record with cloud CDN URLs
+                  await db.photos.update(res.photo.id, {
+                    drive_orig_id: driveOrigId,
+                    drive_thumb_id: driveThumbId,
+                    drive_orig_url: driveOrigUrl,
+                    drive_thumb_url: driveThumbUrl
+                  });
+
                   wsHandle.notifyGDrivePhotoUploaded({
-                    driveOrigId: origResult?.id || '',
-                    driveThumbId: thumbResult?.id || '',
+                    driveOrigId,
+                    driveThumbId,
+                    driveOrigUrl,
+                    driveThumbUrl,
                     filename: res.processed.filename,
                     hash: res.processed.hash,
                     width: res.processed.width,
@@ -1694,7 +1611,7 @@
               }
             }
 
-            // 3. Fallback (local signaling): ONLY send micro-thumbnail, NEVER multi-MB originals!
+            // 2. Fallback (local signaling): ONLY send micro-thumbnail, NEVER multi-MB originals!
             if (!cloudUploaded && wsHandle && typeof wsHandle.sendPhotoDirect === 'function') {
               try {
                 uploadProgressText = `Delivering preview ${i + 1} of ${files.length} to Host Queue...`;
@@ -2785,29 +2702,59 @@
               </div>
             {:else}
               <button
-                class="btn-secondary"
+                class="btn-primary"
                 onclick={() => (isDriveModalOpen = true)}
                 title="Connect your Google Drive to host photos for 100+ guests"
               >
-                <span>☁️</span> Connect Google Drive (100+ Mode)
+                <span>🔗</span> 1-Click Connect Google Drive
               </button>
             {/if}
             <button
               class="btn-primary"
-              onclick={() => (isCreateModalOpen = true)}
+              onclick={() => {
+                if (!isDriveConnected) {
+                  isDriveModalOpen = true;
+                } else {
+                  isCreateModalOpen = true;
+                }
+              }}
             >
               <span>+</span> Create New Event
             </button>
           </div>
         </div>
 
+        {#if !isDriveConnected}
+          <div class="card" style="margin-top: 1.5rem; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white; border: 1px solid #334155; padding: 1.5rem; border-radius: var(--radius-lg);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.25rem;">
+              <div style="max-width: 620px;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+                  <span style="font-size: 1.5rem;">☁️</span>
+                  <h3 style="margin: 0; color: white;">Step 1: Connect Google Drive (Required)</h3>
+                </div>
+                <p style="margin: 0; font-size: 0.9375rem; color: #cbd5e1; line-height: 1.5;">
+                  Connect your Google Drive with 1-Click Google Auth before creating an event. All photos captured by your 100+ guests will be stored directly in your personal Google Drive and streamed via Google's high-speed CDN.
+                </p>
+              </div>
+              <button
+                class="btn-primary"
+                style="background: #2563eb; border-color: #2563eb; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700; white-space: nowrap;"
+                onclick={() => (isDriveModalOpen = true)}
+              >
+                <span>🔗</span> 1-Click Connect Drive
+              </button>
+            </div>
+          </div>
+        {/if}
+
         {#if events.length === 0}
           <div class="card empty-state" style="margin-top: 1.5rem;">
             <div class="empty-icon">📁</div>
             <h3>No events created yet</h3>
             <p class="text-secondary">
-              Create your first event space to generate QR codes and start
-              receiving memories from attendees.
+              {isDriveConnected
+                ? "Click '+ Create New Event' above to set up your event space and generate QR codes."
+                : "Connect your Google Drive above, then create your first event space to start receiving guest memories."}
             </p>
           </div>
         {:else}
@@ -4145,7 +4092,7 @@
     </div>
   {/if}
 
-  <!-- GOOGLE DRIVE CLOUD SETUP MODAL (100+ Attendees) -->
+  <!-- GOOGLE DRIVE 1-CLICK AUTH MODAL (Prerequisite for Event Hosting) -->
   {#if isDriveModalOpen}
     <div
       class="modal-backdrop"
@@ -4159,140 +4106,78 @@
     >
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="modal-card" style="max-width: 620px;" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-card" style="max-width: 520px;" onclick={(e) => e.stopPropagation()}>
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="font-size: 1.5rem;">☁️</span>
             <div>
-              <h3 style="margin: 0;">Google Drive Cloud Hosting</h3>
-              <span class="text-secondary" style="font-size: 0.8125rem;">Direct cloud hosting for 100+ guests with high-speed CDN delivery</span>
+              <h3 style="margin: 0;">Connect Google Drive</h3>
+              <span class="text-secondary" style="font-size: 0.8125rem;">1-Click Google Auth for Hosting 100+ Guest Photos</span>
             </div>
           </div>
           <button class="close-btn" onclick={() => (isDriveModalOpen = false)}>&times;</button>
         </div>
 
-        <div style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem;">
-          <button
-            type="button"
-            class="host-tab-btn {driveModalTab === 'webapp' ? 'active' : ''}"
-            onclick={() => (driveModalTab = 'webapp')}
-          >
-            ⚡ 1-Click Apps Script (Recommended)
-          </button>
-          <button
-            type="button"
-            class="host-tab-btn {driveModalTab === 'oauth' ? 'active' : ''}"
-            onclick={() => (driveModalTab = 'oauth')}
-          >
-            🔑 Google OAuth 2.0 (GIS)
-          </button>
+        <div class="form-stack">
+          <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
+              <span style="font-size: 2rem;">🚀</span>
+              <div>
+                <strong style="font-size: 0.9375rem;">Cloud-First Event Hosting</strong>
+                <p class="text-secondary" style="margin: 0.25rem 0 0 0; font-size: 0.8125rem; line-height: 1.4;">
+                  Authorize EventCaps with your Google account to automatically store guest photo uploads in Google Drive and stream them via Google's high-speed CDN.
+                </p>
+              </div>
+            </div>
+
+            <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem; font-size: 0.8125rem; color: var(--color-text-secondary); line-height: 1.5;">
+              <li>Creates album folder: <code>/EventCaps Events/&lt;Event Name&gt;/</code></li>
+              <li>Guests upload photos directly to your Drive via resumable sessions</li>
+              <li>TV Slideshows & Live Wall stream from Google Cloud CDN</li>
+            </ul>
+          </div>
+
+          <div>
+            <label class="form-label" for="oauthClientIdInput">Google OAuth 2.0 Client ID *</label>
+            <input
+              id="oauthClientIdInput"
+              type="text"
+              class="input-field"
+              placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com"
+              bind:value={gdriveClientIdInput}
+            />
+            <span class="helper-text">From your Google Cloud Console. Saved permanently on this browser.</span>
+          </div>
+
+          <div class="modal-footer" style="margin-top: 1rem;">
+            {#if isDriveConnected}
+              <button
+                type="button"
+                class="btn-secondary"
+                style="color: var(--color-danger);"
+                onclick={handleDisconnectGoogleDrive}
+              >
+                Disconnect
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="btn-secondary"
+              onclick={() => (isDriveModalOpen = false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn-primary"
+              disabled={isConnectingDrive || !gdriveClientIdInput.trim()}
+              onclick={handleConnectGoogleDrive}
+            >
+              <span>🔗</span>
+              {isConnectingDrive ? 'Connecting with Google...' : '1-Click Connect Google Drive'}
+            </button>
+          </div>
         </div>
-
-        {#if driveModalTab === 'webapp'}
-          <div class="form-stack">
-            <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: var(--radius-md); padding: 1rem; color: #166534; font-size: 0.875rem;">
-              <strong>🚀 100% Free & Serverless Google Cloud Hosting</strong>
-              <p style="margin: 0.35rem 0 0 0; line-height: 1.4;">
-                Allows 100+ guest smartphones to upload photos directly to your personal Google Drive with <strong>zero server costs</strong> and <strong>zero login requirements for guests</strong>.
-              </p>
-            </div>
-
-            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem;">
-              <h4 style="margin-bottom: 0.5rem;">3-Step Setup Guide (Takes 60 seconds):</h4>
-              <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--color-text);">
-                <li>Open <strong><a href="https://script.google.com" target="_blank" rel="noopener noreferrer" style="color: var(--color-primary); text-decoration: underline;">script.google.com</a></strong> and click <strong>+ New Project</strong>.</li>
-                <li>Click the button below to copy the script, then paste and replace everything in the editor.</li>
-                <li>Click <strong>Deploy &gt; New deployment</strong>, select <strong>Web app</strong>, choose <strong>Who has access: Anyone</strong>, click <strong>Deploy</strong>, and paste the URL below.</li>
-              </ol>
-
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                style="margin-top: 0.75rem; width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
-                onclick={handleCopyAppsScript}
-              >
-                <span>{scriptCopied ? '✅' : '📋'}</span>
-                <strong>{scriptCopied ? 'Copied Script to Clipboard!' : 'Copy Google Apps Script Code'}</strong>
-              </button>
-            </div>
-
-            <div>
-              <label class="form-label" for="webAppUrlInput">Your Web App Deployment URL</label>
-              <input
-                id="webAppUrlInput"
-                type="url"
-                class="input-field"
-                placeholder="https://script.google.com/macros/s/.../exec"
-                bind:value={gdriveWebAppUrlInput}
-              />
-              <span class="helper-text">Must end in <code>/exec</code></span>
-            </div>
-
-            <div class="modal-footer" style="margin-top: 1rem;">
-              {#if isDriveConnected}
-                <button
-                  type="button"
-                  class="btn-secondary"
-                  style="color: var(--color-danger);"
-                  onclick={handleDisconnectGoogleDrive}
-                >
-                  Disconnect
-                </button>
-              {/if}
-              <button
-                type="button"
-                class="btn-secondary"
-                onclick={() => (isDriveModalOpen = false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="btn-primary"
-                disabled={isTestingDriveWebApp || !gdriveWebAppUrlInput.trim()}
-                onclick={handleSaveDriveWebApp}
-              >
-                {isTestingDriveWebApp ? 'Testing & Connecting...' : 'Connect Google Drive'}
-              </button>
-            </div>
-          </div>
-        {:else}
-          <div class="form-stack">
-            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; font-size: 0.875rem;">
-              <p style="margin: 0; line-height: 1.4;">
-                Standard Google OAuth 2.0 requires a Google Cloud Console project with OAuth Client ID configured for this domain.
-              </p>
-            </div>
-
-            <div>
-              <label class="form-label" for="oauthClientId">Google OAuth 2.0 Client ID</label>
-              <input
-                id="oauthClientId"
-                type="text"
-                class="input-field"
-                placeholder="e.g. 1234567890-abcdef.apps.googleusercontent.com"
-                bind:value={gdriveClientId}
-              />
-            </div>
-
-            <div class="modal-footer">
-              <button
-                type="button"
-                class="btn-secondary"
-                onclick={() => (isDriveModalOpen = false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="btn-primary"
-                onclick={handleConnectGoogleDrive}
-              >
-                Authorize with Google
-              </button>
-            </div>
-          </div>
-        {/if}
       </div>
     </div>
   {/if}

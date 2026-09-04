@@ -2,7 +2,6 @@ import mqtt from 'mqtt';
 import { db, blobToBase64, base64ToBlob, getCachedObjectURL } from './db.js';
 import {
   getStoredDriveToken,
-  getStoredDriveWebAppUrl,
   setupEventDriveHierarchy,
   createResumableUploadSession,
   getDriveCDNUrl,
@@ -191,14 +190,13 @@ export function initRealtimeHub(slug, options = {}) {
     }
   }
 
-  // --- GOOGLE DRIVE SESSION COORDINATION ---
+  // --- GOOGLE DRIVE SESSION COORDINATION (1-Click Google OAuth GIS) ---
   async function handleIncomingGDriveRequest(req) {
     if (!isHost || isDestroyed) return;
     try {
       const token = getStoredDriveToken();
-      const webAppUrl = getStoredDriveWebAppUrl();
 
-      if (!token && !webAppUrl) {
+      if (!token) {
         publishGDriveReady(req.requestId, { requestId: req.requestId, disabled: true });
         return;
       }
@@ -212,16 +210,6 @@ export function initRealtimeHub(slug, options = {}) {
           publishGDriveReady(req.requestId, { requestId: req.requestId, duplicate: true });
           return;
         }
-      }
-
-      if (webAppUrl) {
-        // Direct Web App mode enabled
-        publishGDriveReady(req.requestId, {
-          requestId: req.requestId,
-          webAppUrl,
-          eventName
-        });
-        return;
       }
 
       const { originalsFolderId, thumbnailsFolderId } = await setupEventDriveHierarchy(slug, eventName);
@@ -529,8 +517,7 @@ export function initRealtimeHub(slug, options = {}) {
             tagline: event.tagline,
             guest_upload_limit: Number(event.guest_upload_limit) || 20,
             moderation_enabled: Boolean(event.moderation_enabled),
-            status: event.status,
-            gdrive_webapp_url: getStoredDriveWebAppUrl()
+            status: event.status
           } : null
         }
       };
