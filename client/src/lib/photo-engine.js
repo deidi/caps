@@ -23,20 +23,24 @@ export async function computePhotoHash(blobOrBuffer) {
  */
 async function renderToBlob(imgSource, targetWidth, targetHeight, quality = 0.85, mimeType = 'image/jpeg') {
   const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext('2d', { alpha: false });
+  canvas.width = Math.max(1, Math.round(targetWidth));
+  canvas.height = Math.max(1, Math.round(targetHeight));
+  const ctx = canvas.getContext('2d');
 
   if (!ctx) throw new Error('Canvas 2D context not available');
+
+  // Fill canvas with white background so transparent or unpainted areas never turn black
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // High quality image smoothing
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(imgSource, 0, 0, targetWidth, targetHeight);
+  ctx.drawImage(imgSource, 0, 0, canvas.width, canvas.height);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
+      if (blob && blob.size > 0) resolve(blob);
       else reject(new Error('Failed to generate image blob'));
     }, mimeType, quality);
   });
@@ -45,41 +49,78 @@ async function renderToBlob(imgSource, targetWidth, targetHeight, quality = 0.85
 /**
  * Process a raw photo file client-side:
  * - Computes SHA-256 duplicate hash
- * - Auto-corrects EXIF orientation and strips metadata
- * - Downscales to high-res (max 2048px)
- * - Generates fast 360px thumbnail
+ * - Decodes reliably via HTMLImageElement (with createImageBitmap fallback)
+ * - Auto-corrects orientation and strips unwanted metadata
+ * - Downscales to high-res (max 2048px) & generates fast 360px thumbnail
  */
 export async function processPhotoClient(file, options = {}) {
-  const maxDimension = options.maxDimension || 1600;
+  const maxDimension = options.maxDimension || 2048;
   const thumbDimension = options.thumbDimension || 360;
-  const quality = options.quality || 0.80;
-  const thumbQuality = options.thumbQuality || 0.65;
+  const quality = options.quality || 0.85;
+  const thumbQuality = options.thumbQuality || 0.70;
 
   // 1. Compute SHA-256 duplicate hash from raw input
   const hash = await computePhotoHash(file);
 
-  // 2. Parse orientation with exifr (fallback to 1 if missing)
-  let orientation = 1;
+  let imageSource = null;
+  let srcWidth = 0;
+  let srcHeight = 0;
+  let objectUrlToRevoke = null;
+
+  // 2. Load via HTMLImageElement first (Native mobile browser decoder handles HEIC, EXIF, and camera files reliably)
   try {
-    orientation = await exifr.orientation(file) || 1;
-  } catch (err) {
-    console.warn('EXIF orientation read skipped:', err);
+    objectUrlToRevoke = URL.createObjectURL(file);
+    const img = new Image();
+    img.src = objectUrlToRevoke;
+
+    if (typeof img.decode === 'function') {
+      try {
+        await img.decode();
+      } catch {
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error('Failed to decode image file'));
+        });
+      }
+    } else {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to decode image file'));
+      });
+    }
+
+    srcWidth = img.naturalWidth || img.width;
+    srcHeight = img.naturalHeight || img.height;
+    imageSource = img;
+  } catch (imgErr) {
+    console.warn('HTMLImageElement decode failed, trying createImageBitmap:', imgErr);
+    if (typeof createImageBitmap === 'function') {
+      try {
+        imageSource = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        srcWidth = imageSource.width;
+        srcHeight = imageSource.height;
+      } catch (bitmapErr) {
+        console.warn('createImageBitmap failed:', bitmapErr);
+        imageSource = null;
+      }
+    }
   }
 
-  // 3. Load image into an HTMLImageElement or ImageBitmap
-  const objectUrl = URL.createObjectURL(file);
-  const img = new Image();
+  // Graceful fallback if image decoding completely failed
+  if (!imageSource || !srcWidth || !srcHeight) {
+    return {
+      hash,
+      filename: file.name || `photo_${Date.now()}.jpg`,
+      originalBlob: file,
+      thumbBlob: file,
+      width: 1920,
+      height: 1080,
+      size: file.size,
+      mimeType: file.type || 'image/jpeg',
+    };
+  }
 
-  await new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = () => reject(new Error('Failed to decode image file'));
-    img.src = objectUrl;
-  });
-
-  const srcWidth = img.naturalWidth || img.width;
-  const srcHeight = img.naturalHeight || img.height;
-
-  // 4. Calculate high-res dimensions
+  // 3. Calculate high-res dimensions
   let targetWidth = srcWidth;
   let targetHeight = srcHeight;
 
@@ -93,7 +134,7 @@ export async function processPhotoClient(file, options = {}) {
     }
   }
 
-  // 5. Calculate thumbnail dimensions
+  // 4. Calculate thumbnail dimensions
   let thumbWidth = srcWidth;
   let thumbHeight = srcHeight;
   if (srcWidth >= srcHeight) {
@@ -104,12 +145,26 @@ export async function processPhotoClient(file, options = {}) {
     thumbWidth = Math.round((srcWidth * thumbDimension) / srcHeight);
   }
 
-  // 6. Render High-Res Blob & Thumbnail Blob (Canvas drawing automatically strips EXIF)
-  const originalBlob = await renderToBlob(img, targetWidth, targetHeight, quality, 'image/jpeg');
-  const thumbBlob = await renderToBlob(img, thumbWidth, thumbHeight, thumbQuality, 'image/jpeg');
+  // 5. Render High-Res Blob & Thumbnail Blob
+  let originalBlob;
+  let thumbBlob;
 
-  // Clean up source URL
-  URL.revokeObjectURL(objectUrl);
+  try {
+    originalBlob = await renderToBlob(imageSource, targetWidth, targetHeight, quality, 'image/jpeg');
+    thumbBlob = await renderToBlob(imageSource, thumbWidth, thumbHeight, thumbQuality, 'image/jpeg');
+  } catch (renderErr) {
+    console.warn('Canvas rendering error, using raw file as original:', renderErr);
+    originalBlob = file;
+    thumbBlob = file;
+  }
+
+  // Clean up
+  if (imageSource && typeof imageSource.close === 'function') {
+    try { imageSource.close(); } catch (_) {}
+  }
+  if (objectUrlToRevoke) {
+    URL.revokeObjectURL(objectUrlToRevoke);
+  }
 
   return {
     hash,
@@ -118,7 +173,7 @@ export async function processPhotoClient(file, options = {}) {
     thumbBlob,
     width: targetWidth,
     height: targetHeight,
-    size: originalBlob.size,
-    mimeType: 'image/jpeg'
+    size: originalBlob.size || file.size,
+    mimeType: 'image/jpeg',
   };
 }

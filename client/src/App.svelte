@@ -125,6 +125,33 @@
 
   let wsHandle = null;
 
+  function getPhotoSrc(photo, isThumb = true) {
+    if (!photo) return "";
+    if (typeof photo === "string") return photo;
+    if (isThumb) {
+      return (
+        photo.storage_thumb_url ||
+        photo.thumb_url ||
+        photo.thumbnail_path ||
+        photo.thumbDataUrl ||
+        photo.storage_orig_url ||
+        photo.original_url ||
+        photo.original_path ||
+        ""
+      );
+    }
+    return (
+      photo.storage_orig_url ||
+      photo.original_url ||
+      photo.original_path ||
+      photo.storage_thumb_url ||
+      photo.thumb_url ||
+      photo.thumbnail_path ||
+      photo.thumbDataUrl ||
+      ""
+    );
+  }
+
   function parseRoute() {
     let path = window.location.pathname;
 
@@ -2159,7 +2186,7 @@
                 'fade'}"
             >
               <img
-                src={slideshowPhotos[currentSlideIndex].original_path}
+                src={getPhotoSrc(slideshowPhotos[currentSlideIndex], false)}
                 alt="Slideshow memory"
                 class="slide-img"
               />
@@ -2473,7 +2500,7 @@
                       onclick={() => (selectedPreviewPhoto = photo)}
                     >
                       <img
-                        src={photo.thumbnail_path}
+                        src={getPhotoSrc(photo, true)}
                         alt="Uploaded thumbnail"
                         class="upload-thumb"
                       />
@@ -2608,7 +2635,7 @@
                         : (selectedPreviewPhoto = photo)}
                   >
                     <img
-                      src={photo.thumbnail_path || photo.thumb_url || photo.drive_thumb_url || photo.original_path || photo.original_url}
+                      src={getPhotoSrc(photo, true)}
                       alt="Event memory"
                       class="gallery-thumb"
                       loading="lazy"
@@ -3119,7 +3146,7 @@
                       onclick={() => (selectedPreviewPhoto = photo)}
                     >
                       <img
-                        src={photo.thumbnail_path}
+                        src={getPhotoSrc(photo, true)}
                         alt="Pending upload"
                         class="mod-thumb"
                       />
@@ -3188,7 +3215,7 @@
                       onclick={() => (selectedPreviewPhoto = photo)}
                     >
                       <img
-                        src={photo.thumbnail_path}
+                        src={getPhotoSrc(photo, true)}
                         alt="Approved upload"
                         class="mod-thumb"
                       />
@@ -3835,7 +3862,7 @@
 
         <div class="lightbox-img-wrapper">
           <img
-            src={selectedPreviewPhoto.original_path}
+            src={getPhotoSrc(selectedPreviewPhoto, false)}
             alt="Full resolution capture"
             class="lightbox-img"
           />
@@ -3853,9 +3880,8 @@
               </button>
             {/if}
             <a
-              href={selectedPreviewPhoto.original_path ||
-                selectedPreviewPhoto.original_url}
-              download={selectedPreviewPhoto.filename}
+              href={getPhotoSrc(selectedPreviewPhoto, false)}
+              download={selectedPreviewPhoto.filename || "photo.jpg"}
               class="btn-primary btn-sm"
             >
               <span>💾</span> Download Full-Res Original
