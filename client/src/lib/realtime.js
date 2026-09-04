@@ -2,6 +2,7 @@ import mqtt from 'mqtt';
 import { db, blobToBase64, base64ToBlob, getCachedObjectURL } from './db.js';
 import {
   getStoredDriveToken,
+  getStoredDriveWebAppUrl,
   setupEventDriveHierarchy,
   createResumableUploadSession,
   getDriveCDNUrl,
@@ -10,7 +11,7 @@ import {
 
 /**
  * Ultra-Lightweight Real-time PubSub Event Bus
- * Handles Google Drive cloud uploads with retained gallery sync and instant request/response.
+ * Optimized for 100+ concurrent guests: strictly separates lightweight signaling from heavy binary media.
  */
 export function initRealtimeHub(slug, options = {}) {
   if (!slug) return null;
@@ -195,7 +196,9 @@ export function initRealtimeHub(slug, options = {}) {
     if (!isHost || isDestroyed) return;
     try {
       const token = getStoredDriveToken();
-      if (!token) {
+      const webAppUrl = getStoredDriveWebAppUrl();
+
+      if (!token && !webAppUrl) {
         publishGDriveReady(req.requestId, { requestId: req.requestId, disabled: true });
         return;
       }
@@ -209,6 +212,16 @@ export function initRealtimeHub(slug, options = {}) {
           publishGDriveReady(req.requestId, { requestId: req.requestId, duplicate: true });
           return;
         }
+      }
+
+      if (webAppUrl) {
+        // Direct Web App mode enabled
+        publishGDriveReady(req.requestId, {
+          requestId: req.requestId,
+          webAppUrl,
+          eventName
+        });
+        return;
       }
 
       const { originalsFolderId, thumbnailsFolderId } = await setupEventDriveHierarchy(slug, eventName);
@@ -272,6 +285,8 @@ export function initRealtimeHub(slug, options = {}) {
       const {
         driveOrigId,
         driveThumbId,
+        driveOrigUrl,
+        driveThumbUrl,
         filename,
         hash,
         width,
@@ -304,8 +319,8 @@ export function initRealtimeHub(slug, options = {}) {
         }
       }
 
-      const driveOrigUrl = driveOrigId ? getDriveCDNUrl(driveOrigId, 2048) : '';
-      const driveThumbUrl = driveThumbId ? getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
+      const finalOrigUrl = driveOrigUrl || (driveOrigId ? getDriveCDNUrl(driveOrigId, 2048) : '');
+      const finalThumbUrl = driveThumbUrl || (driveThumbId ? getDriveThumbnailUrl(driveThumbId, 400) : finalOrigUrl);
 
       const photoRecord = {
         event_slug: slug,
@@ -320,8 +335,8 @@ export function initRealtimeHub(slug, options = {}) {
         mime_type: mimeType || 'image/jpeg',
         drive_orig_id: driveOrigId,
         drive_thumb_id: driveThumbId,
-        drive_orig_url: driveOrigUrl,
-        drive_thumb_url: driveThumbUrl,
+        drive_orig_url: finalOrigUrl,
+        drive_thumb_url: finalThumbUrl,
         created_at: now
       };
 
@@ -331,10 +346,10 @@ export function initRealtimeHub(slug, options = {}) {
         id,
         ...photoRecord,
         thumbDataUrl,
-        original_url: driveOrigUrl,
-        thumb_url: driveThumbUrl,
-        original_path: driveOrigUrl,
-        thumbnail_path: driveThumbUrl
+        original_url: finalOrigUrl,
+        thumb_url: finalThumbUrl,
+        original_path: finalOrigUrl,
+        thumbnail_path: finalThumbUrl
       };
 
       onMessage({
@@ -350,7 +365,7 @@ export function initRealtimeHub(slug, options = {}) {
     }
   }
 
-  // --- FALLBACK DIRECT PHOTO STREAMING ---
+  // --- FALLBACK DIRECT PHOTO STREAMING (Strictly Micro-Thumbnails, NEVER multi-MB originals) ---
   async function handleIncomingDirectPhoto(photoData) {
     if (!isHost || isDestroyed) return;
     try {
@@ -364,7 +379,8 @@ export function initRealtimeHub(slug, options = {}) {
         size,
         mimeType,
         thumbDataUrl,
-        originalDataUrl
+        drive_orig_url,
+        drive_thumb_url
       } = photoData;
 
       let event = await db.events.where('slug').equals(slug).first();
@@ -391,8 +407,9 @@ export function initRealtimeHub(slug, options = {}) {
         }
       }
 
-      const origBlob = originalDataUrl ? base64ToBlob(originalDataUrl) : null;
       const thumbBlob = thumbDataUrl ? base64ToBlob(thumbDataUrl) : null;
+      const finalOrigUrl = drive_orig_url || (thumbBlob ? getCachedObjectURL(thumbBlob, `thumb_${Date.now()}`) : '');
+      const finalThumbUrl = drive_thumb_url || (thumbBlob ? getCachedObjectURL(thumbBlob, `thumb_${Date.now()}`) : finalOrigUrl);
 
       const photoRecord = {
         event_slug: slug,
@@ -405,24 +422,22 @@ export function initRealtimeHub(slug, options = {}) {
         height: height || 1536,
         size: size || 0,
         mime_type: mimeType || 'image/jpeg',
-        original_blob: origBlob,
         thumb_blob: thumbBlob,
+        drive_orig_url: drive_orig_url || '',
+        drive_thumb_url: drive_thumb_url || '',
         created_at: now
       };
 
       const id = await db.photos.add(photoRecord);
 
-      const origUrl = origBlob ? getCachedObjectURL(origBlob, `orig_${id}`) : thumbDataUrl;
-      const thumbUrl = thumbBlob ? getCachedObjectURL(thumbBlob, `thumb_${id}`) : thumbDataUrl;
-
       const formattedPhoto = {
         id,
         ...photoRecord,
         thumbDataUrl,
-        original_url: origUrl,
-        thumb_url: thumbUrl,
-        original_path: origUrl,
-        thumbnail_path: thumbUrl
+        original_url: finalOrigUrl,
+        thumb_url: finalThumbUrl,
+        original_path: finalOrigUrl,
+        thumbnail_path: finalThumbUrl
       };
 
       onMessage({
@@ -499,7 +514,7 @@ export function initRealtimeHub(slug, options = {}) {
           original_url: origUrl,
           thumbnail_path: thumbUrl,
           original_path: origUrl,
-          thumbDataUrl
+          thumbDataUrl: (!thumbUrl.startsWith('http') ? thumbDataUrl : '') // Only send base64 if no CDN URL
         });
       }
 
@@ -514,7 +529,8 @@ export function initRealtimeHub(slug, options = {}) {
             tagline: event.tagline,
             guest_upload_limit: Number(event.guest_upload_limit) || 20,
             moderation_enabled: Boolean(event.moderation_enabled),
-            status: event.status
+            status: event.status,
+            gdrive_webapp_url: getStoredDriveWebAppUrl()
           } : null
         }
       };

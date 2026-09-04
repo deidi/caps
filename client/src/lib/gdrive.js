@@ -1,4 +1,4 @@
-import { db } from './db.js';
+import { db, blobToBase64 } from './db.js';
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
@@ -8,6 +8,154 @@ const DRIVE_RESUMABLE_INIT_URL = 'https://www.googleapis.com/upload/drive/v3/fil
 let tokenClient = null;
 const folderCache = new Map();
 
+/**
+ * --- GOOGLE APPS SCRIPT WEB APP RECEIVER (Recommended for 100+ attendees) ---
+ */
+export function getStoredDriveWebAppUrl() {
+  return localStorage.getItem('caps_gdrive_webapp_url') || '';
+}
+
+export function setStoredDriveWebAppUrl(url) {
+  if (url && typeof url === 'string') {
+    localStorage.setItem('caps_gdrive_webapp_url', url.trim());
+  } else {
+    localStorage.removeItem('caps_gdrive_webapp_url');
+  }
+}
+
+/**
+ * Generates the clean Google Apps Script code for the Host to deploy in their Google Account
+ */
+export function getAppsScriptTemplateCode() {
+  return `/**
+ * EventCaps Google Drive Cloud Receiver
+ * Deployed as: Web App | Execute as: Me | Who has access: Anyone
+ */
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    if (data.action === "ping") {
+      return respondJson({ success: true, message: "EventCaps Drive Receiver is active!" });
+    }
+
+    var eventName = (data.eventName || "General Event").trim();
+    var rootFolder = getOrCreateFolder("EventCaps Events", DriveApp.getRootFolder());
+    var eventFolder = getOrCreateFolder(eventName, rootFolder);
+    var origFolder = getOrCreateFolder("originals", eventFolder);
+    var thumbFolder = getOrCreateFolder("thumbnails", eventFolder);
+
+    // Decode base64 blobs
+    var origBytes = Utilities.base64Decode(data.origBase64.split(",").pop());
+    var origBlob = Utilities.newBlob(origBytes, data.mimeType || "image/jpeg", data.fileName || "photo.jpg");
+    var origFile = origFolder.createFile(origBlob);
+
+    var thumbBytes = Utilities.base64Decode(data.thumbBase64.split(",").pop());
+    var thumbBlob = Utilities.newBlob(thumbBytes, "image/jpeg", "thumb_" + (data.fileName || "photo.jpg"));
+    var thumbFile = thumbFolder.createFile(thumbBlob);
+
+    // Set public view permissions so Google CDN can stream directly to attendees
+    try {
+      origFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      thumbFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (permErr) {}
+
+    var origId = origFile.getId();
+    var thumbId = thumbFile.getId();
+
+    return respondJson({
+      success: true,
+      driveOrigId: origId,
+      driveThumbId: thumbId,
+      driveOrigUrl: "https://lh3.googleusercontent.com/d/" + origId + "=s2048",
+      driveThumbUrl: "https://lh3.googleusercontent.com/d/" + thumbId + "=s400",
+      folderUrl: eventFolder.getUrl()
+    });
+  } catch (err) {
+    return respondJson({ success: false, error: err.toString() });
+  }
+}
+
+function doGet(e) {
+  return respondJson({ success: true, message: "EventCaps Drive Receiver is active!" });
+}
+
+function getOrCreateFolder(folderName, parent) {
+  var folders = parent.getFoldersByName(folderName);
+  if (folders.hasNext()) {
+    return folders.next();
+  }
+  return parent.createFolder(folderName);
+}
+
+function respondJson(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+}
+
+/**
+ * Test connectivity to Google Apps Script Web App
+ */
+export async function testDriveWebApp(webAppUrl) {
+  if (!webAppUrl) throw new Error('Web App URL is required');
+  const res = await fetch(webAppUrl, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!res.ok) {
+    throw new Error(`Google Apps Script returned status ${res.status}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Upload a processed photo directly from guest phone to Google Apps Script Web App
+ */
+export async function uploadPhotoToDriveWebApp(webAppUrl, { eventName, fileName, origBlob, thumbBlob, mimeType }) {
+  if (!webAppUrl) throw new Error('Google Drive Web App URL is not configured');
+
+  const [origBase64, thumbBase64] = await Promise.all([
+    blobToBase64(origBlob),
+    blobToBase64(thumbBlob)
+  ]);
+
+  const payload = {
+    eventName: eventName || 'Event',
+    fileName: fileName || `photo_${Date.now()}.jpg`,
+    mimeType: mimeType || 'image/jpeg',
+    origBase64,
+    thumbBase64
+  };
+
+  const res = await fetch(webAppUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8' // Text plain prevents CORS preflight issues with Google Apps Script
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Google Drive upload failed with status ${res.status}`);
+  }
+
+  const result = await res.json();
+  if (!result.success) {
+    throw new Error(result.error || 'Google Apps Script failed to save photo');
+  }
+
+  return {
+    driveOrigId: result.driveOrigId,
+    driveThumbId: result.driveThumbId,
+    driveOrigUrl: result.driveOrigUrl || getDriveCDNUrl(result.driveOrigId, 2048),
+    driveThumbUrl: result.driveThumbUrl || getDriveThumbnailUrl(result.driveThumbId, 400),
+    folderUrl: result.folderUrl
+  };
+}
+
+/**
+ * --- GOOGLE OAUTH 2.0 (GIS) TOKEN & RESUMABLE UPLOAD MANAGEMENT ---
+ */
 export function getStoredDriveToken() {
   const token = localStorage.getItem('caps_gdrive_token');
   const expiry = localStorage.getItem('caps_gdrive_token_expiry');
@@ -27,6 +175,10 @@ export function setStoredDriveToken(token, expiresIn = 3600) {
   }
 }
 
+export function isDriveConnected() {
+  return Boolean(getStoredDriveWebAppUrl() || getStoredDriveToken());
+}
+
 export function disconnectGoogleDrive() {
   const token = getStoredDriveToken();
   if (token && typeof google !== 'undefined' && google?.accounts?.oauth2) {
@@ -35,6 +187,7 @@ export function disconnectGoogleDrive() {
     } catch (_) {}
   }
   setStoredDriveToken(null);
+  setStoredDriveWebAppUrl(null);
   folderCache.clear();
 }
 
@@ -215,7 +368,6 @@ export async function createResumableUploadSession({ folderId, fileName, mimeTyp
 
 /**
  * Upload a binary Blob directly to a Google Drive Resumable Session URI
- * (Can be called by guest phone directly without OAuth headers)
  */
 export function uploadBlobToResumableSession(uploadUri, blob, mimeType = 'image/jpeg', onProgress = () => {}) {
   return new Promise((resolve, reject) => {
@@ -251,7 +403,7 @@ export function uploadBlobToResumableSession(uploadUri, blob, mimeType = 'image/
 }
 
 /**
- * Helper to get CDN direct image URLs from Google Drive File ID
+ * Helper to get high-speed Google CDN URLs
  */
 export function getDriveCDNUrl(fileId, size = 1600) {
   if (!fileId) return '';
@@ -260,7 +412,7 @@ export function getDriveCDNUrl(fileId, size = 1600) {
 
 export function getDriveThumbnailUrl(fileId, size = 400) {
   if (!fileId) return '';
-  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size}`;
+  return `https://lh3.googleusercontent.com/d/${fileId}=s${size}`;
 }
 
 /**

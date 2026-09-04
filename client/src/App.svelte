@@ -1110,14 +1110,52 @@
     }
   }
 
-  // --- GOOGLE DRIVE BACKUP & ZIP EXPORTS (Client-Side Storage) ---
+  // --- GOOGLE DRIVE CLOUD STORAGE & ZIP EXPORTS ---
+  let isDriveModalOpen = $state(false);
+  let driveModalTab = $state("webapp"); // "webapp" | "oauth"
+  let gdriveWebAppUrl = $state(gdrive.getStoredDriveWebAppUrl());
+  let gdriveWebAppUrlInput = $state(gdrive.getStoredDriveWebAppUrl());
+  let isTestingDriveWebApp = $state(false);
+  let scriptCopied = $state(false);
   let gdriveClientId = $state(
     localStorage.getItem("caps_gdrive_client_id") || "",
   );
-  let isDriveConnected = $state(Boolean(gdrive.getStoredDriveToken()));
+  let isDriveConnected = $state(Boolean(gdrive.isDriveConnected()));
   let isSyncingDrive = $state(false);
   let driveSyncProgress = $state("");
   let driveEventFolderUrl = $state("");
+
+  function handleCopyAppsScript() {
+    const code = gdrive.getAppsScriptTemplateCode();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code);
+    }
+    scriptCopied = true;
+    setTimeout(() => (scriptCopied = false), 3500);
+  }
+
+  async function handleSaveDriveWebApp() {
+    if (!gdriveWebAppUrlInput.trim()) return;
+    isTestingDriveWebApp = true;
+    try {
+      await gdrive.testDriveWebApp(gdriveWebAppUrlInput.trim());
+      gdrive.setStoredDriveWebAppUrl(gdriveWebAppUrlInput.trim());
+      gdriveWebAppUrl = gdriveWebAppUrlInput.trim();
+      isDriveConnected = true;
+      successMsg = "⚡ Google Drive Cloud Receiver connected! 100+ guest uploads ready.";
+      setTimeout(() => (successMsg = ""), 4500);
+      isDriveModalOpen = false;
+
+      // Broadcast gallery settings so all connected devices know the cloud endpoint
+      if (wsHandle && typeof wsHandle.broadcastGallery === "function") {
+        wsHandle.broadcastGallery();
+      }
+    } catch (err) {
+      alert("Could not connect to Google Apps Script: " + err.message + "\n\nPlease ensure you deployed as 'Web app' with 'Who has access: Anyone'.");
+    } finally {
+      isTestingDriveWebApp = false;
+    }
+  }
 
   async function handleConnectGoogleDrive() {
     let clientId = gdriveClientId.trim();
@@ -1144,6 +1182,7 @@
       }
       successMsg = "Connected to Google Drive! Direct 100+ guest uploads active.";
       setTimeout(() => (successMsg = ""), 4000);
+      isDriveModalOpen = false;
     } catch (err) {
       alert("Google Drive connection failed: " + err.message);
     }
@@ -1151,16 +1190,19 @@
 
   function handleDisconnectGoogleDrive() {
     gdrive.disconnectGoogleDrive();
+    gdriveWebAppUrl = "";
+    gdriveWebAppUrlInput = "";
     isDriveConnected = false;
     driveEventFolderUrl = "";
     successMsg = "Disconnected from Google Drive.";
     setTimeout(() => (successMsg = ""), 3000);
+    isDriveModalOpen = false;
   }
 
   async function handleSyncToGoogleDrive(slug) {
     if (!isDriveConnected) {
-      await handleConnectGoogleDrive();
-      if (!isDriveConnected) return;
+      isDriveModalOpen = true;
+      return;
     }
     isSyncingDrive = true;
     driveSyncProgress = "Starting Google Drive sync...";
@@ -1527,62 +1569,136 @@
           guestSession.quota = res.quota;
           guestSession.guest.upload_count = res.quota.used;
 
-          if (wsHandle && res.processed) {
+          if (res.processed) {
             let cloudUploaded = false;
-            try {
-              uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
-              const session = await wsHandle.requestGDriveUploadSession(
-                {
-                  filename: res.processed.filename,
-                  mimeType: res.processed.mimeType,
-                  origSize: res.processed.originalBlob.size,
-                  thumbSize: res.processed.thumbBlob.size,
-                  hash: res.processed.hash
-                },
-                {
-                  name: guestSession.guest.name,
-                  token: guestSession.guest.token
-                }
-              );
 
-              if (session && session.origUploadUri && session.thumbUploadUri) {
-                uploadProgressText = `Streaming photo ${i + 1} of ${files.length} to Google Drive...`;
-                const [origResult, thumbResult] = await Promise.all([
-                  gdrive.uploadBlobToResumableSession(
-                    session.origUploadUri,
-                    res.processed.originalBlob,
-                    res.processed.mimeType
-                  ),
-                  gdrive.uploadBlobToResumableSession(
-                    session.thumbUploadUri,
-                    res.processed.thumbBlob,
-                    'image/jpeg'
-                  )
-                ]);
-
-                wsHandle.notifyGDrivePhotoUploaded({
-                  driveOrigId: origResult?.id || '',
-                  driveThumbId: thumbResult?.id || '',
-                  filename: res.processed.filename,
-                  hash: res.processed.hash,
-                  width: res.processed.width,
-                  height: res.processed.height,
-                  size: res.processed.size,
-                  mimeType: res.processed.mimeType,
-                  guest_name: guestSession.guest.name,
-                  guest_token: guestSession.guest.token
+            // 1. Direct 1-Shot Google Drive Web App Upload (Recommended for 100+ guests)
+            const activeWebAppUrl = guestEventData?.gdrive_webapp_url || gdriveWebAppUrl || gdrive.getStoredDriveWebAppUrl();
+            if (activeWebAppUrl) {
+              try {
+                uploadProgressText = `Uploading photo ${i + 1} of ${files.length} to Google Drive...`;
+                const driveResult = await gdrive.uploadPhotoToDriveWebApp(activeWebAppUrl, {
+                  eventName: guestEventData?.name || currentEventSlug,
+                  fileName: res.processed.filename,
+                  origBlob: res.processed.originalBlob,
+                  thumbBlob: res.processed.thumbBlob,
+                  mimeType: res.processed.mimeType
                 });
-                cloudUploaded = true;
+
+                if (driveResult && driveResult.driveOrigId) {
+                  // Update local guest DB with cloud CDN URLs
+                  await db.photos.update(res.photo.id, {
+                    drive_orig_id: driveResult.driveOrigId,
+                    drive_thumb_id: driveResult.driveThumbId,
+                    drive_orig_url: driveResult.driveOrigUrl,
+                    drive_thumb_url: driveResult.driveThumbUrl
+                  });
+
+                  if (wsHandle) {
+                    wsHandle.notifyGDrivePhotoUploaded({
+                      driveOrigId: driveResult.driveOrigId,
+                      driveThumbId: driveResult.driveThumbId,
+                      driveOrigUrl: driveResult.driveOrigUrl,
+                      driveThumbUrl: driveResult.driveThumbUrl,
+                      filename: res.processed.filename,
+                      hash: res.processed.hash,
+                      width: res.processed.width,
+                      height: res.processed.height,
+                      size: res.processed.size,
+                      mimeType: res.processed.mimeType,
+                      guest_name: guestSession.guest.name,
+                      guest_token: guestSession.guest.token
+                    });
+                  }
+                  cloudUploaded = true;
+                }
+              } catch (webAppErr) {
+                console.warn('Direct Google Drive Web App upload error:', webAppErr);
               }
-            } catch (cloudErr) {
-              console.warn('Direct Google Drive upload failed, falling back to direct relay:', cloudErr);
             }
 
-            if (!cloudUploaded && typeof wsHandle.sendPhotoDirect === 'function') {
+            // 2. Resumable Session via Host MQTT Coordination
+            if (!cloudUploaded && wsHandle) {
               try {
-                uploadProgressText = `Delivering photo ${i + 1} of ${files.length} to Host Queue...`;
+                uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
+                const session = await wsHandle.requestGDriveUploadSession(
+                  {
+                    filename: res.processed.filename,
+                    mimeType: res.processed.mimeType,
+                    origSize: res.processed.originalBlob.size,
+                    thumbSize: res.processed.thumbBlob.size,
+                    hash: res.processed.hash
+                  },
+                  {
+                    name: guestSession.guest.name,
+                    token: guestSession.guest.token
+                  }
+                );
+
+                if (session && session.webAppUrl) {
+                  const driveResult = await gdrive.uploadPhotoToDriveWebApp(session.webAppUrl, {
+                    eventName: session.eventName || guestEventData?.name || currentEventSlug,
+                    fileName: res.processed.filename,
+                    origBlob: res.processed.originalBlob,
+                    thumbBlob: res.processed.thumbBlob,
+                    mimeType: res.processed.mimeType
+                  });
+                  if (driveResult && driveResult.driveOrigId) {
+                    wsHandle.notifyGDrivePhotoUploaded({
+                      driveOrigId: driveResult.driveOrigId,
+                      driveThumbId: driveResult.driveThumbId,
+                      driveOrigUrl: driveResult.driveOrigUrl,
+                      driveThumbUrl: driveResult.driveThumbUrl,
+                      filename: res.processed.filename,
+                      hash: res.processed.hash,
+                      width: res.processed.width,
+                      height: res.processed.height,
+                      size: res.processed.size,
+                      mimeType: res.processed.mimeType,
+                      guest_name: guestSession.guest.name,
+                      guest_token: guestSession.guest.token
+                    });
+                    cloudUploaded = true;
+                  }
+                } else if (session && session.origUploadUri && session.thumbUploadUri) {
+                  uploadProgressText = `Streaming photo ${i + 1} of ${files.length} to Google Drive...`;
+                  const [origResult, thumbResult] = await Promise.all([
+                    gdrive.uploadBlobToResumableSession(
+                      session.origUploadUri,
+                      res.processed.originalBlob,
+                      res.processed.mimeType
+                    ),
+                    gdrive.uploadBlobToResumableSession(
+                      session.thumbUploadUri,
+                      res.processed.thumbBlob,
+                      'image/jpeg'
+                    )
+                  ]);
+
+                  wsHandle.notifyGDrivePhotoUploaded({
+                    driveOrigId: origResult?.id || '',
+                    driveThumbId: thumbResult?.id || '',
+                    filename: res.processed.filename,
+                    hash: res.processed.hash,
+                    width: res.processed.width,
+                    height: res.processed.height,
+                    size: res.processed.size,
+                    mimeType: res.processed.mimeType,
+                    guest_name: guestSession.guest.name,
+                    guest_token: guestSession.guest.token
+                  });
+                  cloudUploaded = true;
+                }
+              } catch (cloudErr) {
+                console.warn('Direct Google Drive upload failed, falling back to direct relay:', cloudErr);
+              }
+            }
+
+            // 3. Fallback (local signaling): ONLY send micro-thumbnail, NEVER multi-MB originals!
+            if (!cloudUploaded && wsHandle && typeof wsHandle.sendPhotoDirect === 'function') {
+              try {
+                uploadProgressText = `Delivering preview ${i + 1} of ${files.length} to Host Queue...`;
                 const thumbDataUrl = await blobToBase64(res.processed.thumbBlob);
-                const originalDataUrl = await blobToBase64(res.processed.originalBlob);
                 wsHandle.sendPhotoDirect({
                   filename: res.processed.filename,
                   hash: res.processed.hash,
@@ -1592,8 +1708,7 @@
                   mimeType: res.processed.mimeType,
                   guest_name: guestSession.guest.name,
                   guest_token: guestSession.guest.token,
-                  thumbDataUrl,
-                  originalDataUrl
+                  thumbDataUrl
                 });
               } catch (fallbackErr) {
                 console.error('Direct fallback transmission error:', fallbackErr);
@@ -2652,9 +2767,14 @@
           <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
             {#if isDriveConnected}
               <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span class="status-pill pill-approved">
-                  ☁️ Google Drive Connected
-                </span>
+                <button
+                  class="status-pill pill-approved"
+                  style="cursor: pointer; border: none;"
+                  onclick={() => (isDriveModalOpen = true)}
+                  title="Configure Google Drive Cloud Hosting"
+                >
+                  ☁️ Google Drive Connected ⚙️
+                </button>
                 <button
                   class="btn-secondary btn-sm"
                   onclick={handleDisconnectGoogleDrive}
@@ -2666,7 +2786,7 @@
             {:else}
               <button
                 class="btn-secondary"
-                onclick={handleConnectGoogleDrive}
+                onclick={() => (isDriveModalOpen = true)}
                 title="Connect your Google Drive to host photos for 100+ guests"
               >
                 <span>☁️</span> Connect Google Drive (100+ Mode)
@@ -4021,6 +4141,158 @@
             </div>
           {/if}
         </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- GOOGLE DRIVE CLOUD SETUP MODAL (100+ Attendees) -->
+  {#if isDriveModalOpen}
+    <div
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      onclick={() => (isDriveModalOpen = false)}
+      onkeydown={(e) => {
+        if (e.key === "Escape") isDriveModalOpen = false;
+      }}
+    >
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="modal-card" style="max-width: 620px;" onclick={(e) => e.stopPropagation()}>
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.5rem;">☁️</span>
+            <div>
+              <h3 style="margin: 0;">Google Drive Cloud Hosting</h3>
+              <span class="text-secondary" style="font-size: 0.8125rem;">Direct cloud hosting for 100+ guests with high-speed CDN delivery</span>
+            </div>
+          </div>
+          <button class="close-btn" onclick={() => (isDriveModalOpen = false)}>&times;</button>
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem;">
+          <button
+            type="button"
+            class="host-tab-btn {driveModalTab === 'webapp' ? 'active' : ''}"
+            onclick={() => (driveModalTab = 'webapp')}
+          >
+            ⚡ 1-Click Apps Script (Recommended)
+          </button>
+          <button
+            type="button"
+            class="host-tab-btn {driveModalTab === 'oauth' ? 'active' : ''}"
+            onclick={() => (driveModalTab = 'oauth')}
+          >
+            🔑 Google OAuth 2.0 (GIS)
+          </button>
+        </div>
+
+        {#if driveModalTab === 'webapp'}
+          <div class="form-stack">
+            <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: var(--radius-md); padding: 1rem; color: #166534; font-size: 0.875rem;">
+              <strong>🚀 100% Free & Serverless Google Cloud Hosting</strong>
+              <p style="margin: 0.35rem 0 0 0; line-height: 1.4;">
+                Allows 100+ guest smartphones to upload photos directly to your personal Google Drive with <strong>zero server costs</strong> and <strong>zero login requirements for guests</strong>.
+              </p>
+            </div>
+
+            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem;">
+              <h4 style="margin-bottom: 0.5rem;">3-Step Setup Guide (Takes 60 seconds):</h4>
+              <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--color-text);">
+                <li>Open <strong><a href="https://script.google.com" target="_blank" rel="noopener noreferrer" style="color: var(--color-primary); text-decoration: underline;">script.google.com</a></strong> and click <strong>+ New Project</strong>.</li>
+                <li>Click the button below to copy the script, then paste and replace everything in the editor.</li>
+                <li>Click <strong>Deploy &gt; New deployment</strong>, select <strong>Web app</strong>, choose <strong>Who has access: Anyone</strong>, click <strong>Deploy</strong>, and paste the URL below.</li>
+              </ol>
+
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                style="margin-top: 0.75rem; width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
+                onclick={handleCopyAppsScript}
+              >
+                <span>{scriptCopied ? '✅' : '📋'}</span>
+                <strong>{scriptCopied ? 'Copied Script to Clipboard!' : 'Copy Google Apps Script Code'}</strong>
+              </button>
+            </div>
+
+            <div>
+              <label class="form-label" for="webAppUrlInput">Your Web App Deployment URL</label>
+              <input
+                id="webAppUrlInput"
+                type="url"
+                class="input-field"
+                placeholder="https://script.google.com/macros/s/.../exec"
+                bind:value={gdriveWebAppUrlInput}
+              />
+              <span class="helper-text">Must end in <code>/exec</code></span>
+            </div>
+
+            <div class="modal-footer" style="margin-top: 1rem;">
+              {#if isDriveConnected}
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  style="color: var(--color-danger);"
+                  onclick={handleDisconnectGoogleDrive}
+                >
+                  Disconnect
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="btn-secondary"
+                onclick={() => (isDriveModalOpen = false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                disabled={isTestingDriveWebApp || !gdriveWebAppUrlInput.trim()}
+                onclick={handleSaveDriveWebApp}
+              >
+                {isTestingDriveWebApp ? 'Testing & Connecting...' : 'Connect Google Drive'}
+              </button>
+            </div>
+          </div>
+        {:else}
+          <div class="form-stack">
+            <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; font-size: 0.875rem;">
+              <p style="margin: 0; line-height: 1.4;">
+                Standard Google OAuth 2.0 requires a Google Cloud Console project with OAuth Client ID configured for this domain.
+              </p>
+            </div>
+
+            <div>
+              <label class="form-label" for="oauthClientId">Google OAuth 2.0 Client ID</label>
+              <input
+                id="oauthClientId"
+                type="text"
+                class="input-field"
+                placeholder="e.g. 1234567890-abcdef.apps.googleusercontent.com"
+                bind:value={gdriveClientId}
+              />
+            </div>
+
+            <div class="modal-footer">
+              <button
+                type="button"
+                class="btn-secondary"
+                onclick={() => (isDriveModalOpen = false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                onclick={handleConnectGoogleDrive}
+              >
+                Authorize with Google
+              </button>
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
