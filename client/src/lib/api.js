@@ -152,8 +152,9 @@ export function createWebSocketConnection(slugOrMessage, optionsOrStatus, maybeS
 
 import { exportFullEventArchive, exportSelectedPhotosZip } from './archive.js';
 import * as gdrive from './gdrive.js';
+import * as storage from './storage.js';
 
-export { exportFullEventArchive, exportSelectedPhotosZip, gdrive };
+export { exportFullEventArchive, exportSelectedPhotosZip, gdrive, storage };
 
 /**
  * Trigger ZIP download for selected photo IDs

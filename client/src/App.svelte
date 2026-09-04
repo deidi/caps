@@ -10,6 +10,7 @@
     downloadSelectedZip,
     downloadFullArchiveZip,
     gdrive,
+    storage,
   } from "./lib/api.js";
   import {
     enqueueOfflinePhoto,
@@ -1180,7 +1181,45 @@
     }
   }
 
-  // --- GOOGLE DRIVE 1-CLICK OAUTH & ZIP EXPORTS ---
+  // --- SUPABASE CLOUD STORAGE & BACKUP STATE ---
+  let isStorageModalOpen = $state(false);
+  const initialSupabaseConfig = storage.getSupabaseConfig();
+  let supabaseUrlInput = $state(initialSupabaseConfig.url);
+  let supabaseAnonKeyInput = $state(initialSupabaseConfig.anonKey);
+  let supabaseBucketInput = $state(initialSupabaseConfig.bucket);
+  let isStorageConfigured = $state(storage.isStorageConfigured());
+  let isTestingStorage = $state(false);
+  let storageTestResult = $state(null);
+
+  async function handleSaveStorageConfig() {
+    try {
+      storage.setSupabaseConfig(supabaseUrlInput, supabaseAnonKeyInput, supabaseBucketInput);
+      supabaseConfig = storage.getSupabaseConfig();
+      isStorageConfigured = storage.isStorageConfigured();
+      isStorageModalOpen = false;
+      successMsg = "⚡ Supabase Cloud Storage configured successfully!";
+      setTimeout(() => (successMsg = ""), 4000);
+    } catch (err) {
+      alert("Failed to save Supabase configuration: " + err.message);
+    }
+  }
+
+  async function handleTestStorageConnection() {
+    isTestingStorage = true;
+    storageTestResult = null;
+    try {
+      storage.setSupabaseConfig(supabaseUrlInput, supabaseAnonKeyInput, supabaseBucketInput);
+      const res = await storage.testStorageConnection();
+      storageTestResult = { success: true, message: res.message };
+      isStorageConfigured = true;
+    } catch (err) {
+      storageTestResult = { success: false, message: err.message };
+    } finally {
+      isTestingStorage = false;
+    }
+  }
+
+  // --- GOOGLE DRIVE 1-CLICK OAUTH & ZIP EXPORTS (Optional Secondary Backup) ---
   let isDriveModalOpen = $state(false);
   let gdriveClientId = $state(
     gdrive.getEffectiveClientId(),
@@ -1614,38 +1653,36 @@
           if (res.processed) {
             let cloudUploaded = false;
 
-            // 1. Direct Google Drive upload if this browser has Google Drive connected
-            if (gdrive.isDriveConnected()) {
-              try {
-                uploadProgressText = `Uploading photo ${i + 1} of ${files.length} to Google Drive...`;
-                const { originalsFolderId, thumbnailsFolderId } = await gdrive.setupEventDriveHierarchy(
-                  currentEventSlug,
-                  guestEventData?.name || currentEventSlug
-                );
-                const [origResult, thumbResult] = await Promise.all([
-                  gdrive.uploadBlobToDrive(originalsFolderId, res.processed.filename, res.processed.originalBlob, res.processed.mimeType),
-                  gdrive.uploadBlobToDrive(thumbnailsFolderId, `thumb_${res.processed.filename}`, res.processed.thumbBlob, 'image/jpeg')
-                ]);
+            // 1. Direct Supabase Cloud Storage Upload (Sub-second global CDN)
+            try {
+              uploadProgressText = `Uploading photo ${i + 1} of ${files.length} to Cloud Storage...`;
+              const uploadRes = await storage.uploadPhotoToStorage({
+                eventSlug: currentEventSlug,
+                fileName: res.processed.filename,
+                origBlob: res.processed.originalBlob,
+                thumbBlob: res.processed.thumbBlob,
+                mimeType: res.processed.mimeType,
+              });
 
-                const driveOrigId = origResult?.id || '';
-                const driveThumbId = thumbResult?.id || '';
-                const driveOrigUrl = driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '';
-                const driveThumbUrl = driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
-
-                // Update guest local record with cloud CDN URLs
+              if (uploadRes && uploadRes.origUrl) {
+                // Update photo record with Supabase public CDN URLs
                 await db.photos.update(res.photo.id, {
-                  drive_orig_id: driveOrigId,
-                  drive_thumb_id: driveThumbId,
-                  drive_orig_url: driveOrigUrl,
-                  drive_thumb_url: driveThumbUrl
+                  storage_orig_path: uploadRes.origPath,
+                  storage_thumb_path: uploadRes.thumbPath,
+                  storage_orig_url: uploadRes.origUrl,
+                  storage_thumb_url: uploadRes.thumbUrl,
+                  original_url: uploadRes.origUrl,
+                  thumb_url: uploadRes.thumbUrl,
+                  original_path: uploadRes.origUrl,
+                  thumbnail_path: uploadRes.thumbUrl,
                 });
 
                 if (wsHandle) {
-                  wsHandle.notifyGDrivePhotoUploaded({
-                    driveOrigId,
-                    driveThumbId,
-                    driveOrigUrl,
-                    driveThumbUrl,
+                  wsHandle.notifyPhotoUploaded({
+                    origUrl: uploadRes.origUrl,
+                    thumbUrl: uploadRes.thumbUrl,
+                    origPath: uploadRes.origPath,
+                    thumbPath: uploadRes.thumbPath,
                     filename: res.processed.filename,
                     hash: res.processed.hash,
                     width: res.processed.width,
@@ -1653,88 +1690,25 @@
                     size: res.processed.size,
                     mimeType: res.processed.mimeType,
                     guest_name: guestSession.guest.name,
-                    guest_token: guestSession.guest.token
+                    guest_token: guestSession.guest.token,
                   });
                 }
                 cloudUploaded = true;
-              } catch (directDriveErr) {
-                console.warn('Direct Google Drive upload on connected client failed, attempting relay:', directDriveErr);
               }
+            } catch (storageErr) {
+              console.warn("Direct Supabase cloud upload failed, using fallback preview:", storageErr);
             }
 
-            // 2. Google Drive Direct Resumable Upload (via Host OAuth Session for remote guests)
+            // 2. Fallback (local signaling if storage unreachable): send micro-thumbnail
             if (!cloudUploaded && wsHandle) {
-              try {
-                uploadProgressText = `Connecting cloud upload slot (${i + 1}/${files.length})...`;
-                const session = await wsHandle.requestGDriveUploadSession(
-                  {
-                    filename: res.processed.filename,
-                    mimeType: res.processed.mimeType,
-                    origSize: res.processed.originalBlob.size,
-                    thumbSize: res.processed.thumbBlob.size,
-                    hash: res.processed.hash
-                  },
-                  {
-                    name: guestSession.guest.name,
-                    token: guestSession.guest.token
-                  }
-                );
-
-                if (session && session.origUploadUri && session.thumbUploadUri) {
-                  uploadProgressText = `Streaming photo ${i + 1} of ${files.length} to Google Drive...`;
-                  const [origResult, thumbResult] = await Promise.all([
-                    gdrive.uploadBlobToResumableSession(
-                      session.origUploadUri,
-                      res.processed.originalBlob,
-                      res.processed.mimeType
-                    ),
-                    gdrive.uploadBlobToResumableSession(
-                      session.thumbUploadUri,
-                      res.processed.thumbBlob,
-                      'image/jpeg'
-                    )
-                  ]);
-
-                  const driveOrigId = origResult?.id || '';
-                  const driveThumbId = thumbResult?.id || '';
-                  const driveOrigUrl = driveOrigId ? gdrive.getDriveCDNUrl(driveOrigId, 2048) : '';
-                  const driveThumbUrl = driveThumbId ? gdrive.getDriveThumbnailUrl(driveThumbId, 400) : driveOrigUrl;
-
-                  // Update guest local record with cloud CDN URLs
-                  await db.photos.update(res.photo.id, {
-                    drive_orig_id: driveOrigId,
-                    drive_thumb_id: driveThumbId,
-                    drive_orig_url: driveOrigUrl,
-                    drive_thumb_url: driveThumbUrl
-                  });
-
-                  wsHandle.notifyGDrivePhotoUploaded({
-                    driveOrigId,
-                    driveThumbId,
-                    driveOrigUrl,
-                    driveThumbUrl,
-                    filename: res.processed.filename,
-                    hash: res.processed.hash,
-                    width: res.processed.width,
-                    height: res.processed.height,
-                    size: res.processed.size,
-                    mimeType: res.processed.mimeType,
-                    guest_name: guestSession.guest.name,
-                    guest_token: guestSession.guest.token
-                  });
-                  cloudUploaded = true;
-                }
-              } catch (cloudErr) {
-                console.warn('Direct Google Drive upload failed, falling back to direct relay:', cloudErr);
-              }
-            }
-
-            // 2. Fallback (local signaling): ONLY send micro-thumbnail, NEVER multi-MB originals!
-            if (!cloudUploaded && wsHandle && typeof wsHandle.sendPhotoDirect === 'function') {
               try {
                 uploadProgressText = `Delivering preview ${i + 1} of ${files.length} to Host Queue...`;
                 const thumbDataUrl = await blobToBase64(res.processed.thumbBlob);
-                wsHandle.sendPhotoDirect({
+                wsHandle.notifyPhotoUploaded({
+                  origUrl: "",
+                  thumbUrl: thumbDataUrl,
+                  origPath: "",
+                  thumbPath: "",
                   filename: res.processed.filename,
                   hash: res.processed.hash,
                   width: res.processed.width,
@@ -1743,10 +1717,10 @@
                   mimeType: res.processed.mimeType,
                   guest_name: guestSession.guest.name,
                   guest_token: guestSession.guest.token,
-                  thumbDataUrl
+                  thumbDataUrl,
                 });
               } catch (fallbackErr) {
-                console.error('Direct fallback transmission error:', fallbackErr);
+                console.error("Direct fallback transmission error:", fallbackErr);
               }
             }
           }
@@ -2800,68 +2774,51 @@
             </p>
           </div>
           <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-            {#if isDriveConnected}
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <button
-                  class="status-pill pill-approved"
-                  style="cursor: pointer; border: none;"
-                  onclick={() => (isDriveModalOpen = true)}
-                  title="Configure Google Drive Cloud Hosting"
-                >
-                  ☁️ Google Drive Connected ⚙️
-                </button>
-                <button
-                  class="btn-secondary btn-sm"
-                  onclick={handleDisconnectGoogleDrive}
-                  title="Disconnect Google Drive"
-                >
-                  Disconnect
-                </button>
-              </div>
+            {#if isStorageConfigured}
+              <button
+                class="status-pill pill-approved"
+                style="cursor: pointer; border: none; font-size: 0.875rem;"
+                onclick={() => (isStorageModalOpen = true)}
+                title="Configure Cloud Storage Settings"
+              >
+                ⚡ Supabase Cloud Storage: Active ⚙️
+              </button>
             {:else}
               <button
-                class="btn-primary"
-                onclick={() => handleConnectGoogleDrive()}
-                disabled={isConnectingDrive}
-                title="Connect your Google Drive to host photos for 100+ guests"
+                class="btn-secondary btn-sm"
+                onclick={() => (isStorageModalOpen = true)}
+                title="Configure Supabase Cloud Storage"
               >
-                <span>🔗</span> {isConnectingDrive ? "Connecting..." : "1-Click Connect Google Drive"}
+                ⚙️ Setup Cloud Storage
               </button>
             {/if}
             <button
               class="btn-primary"
-              onclick={() => {
-                if (!isDriveConnected) {
-                  handleConnectGoogleDrive();
-                } else {
-                  isCreateModalOpen = true;
-                }
-              }}
+              onclick={() => (isCreateModalOpen = true)}
             >
               <span>+</span> Create New Event
             </button>
           </div>
         </div>
 
-        {#if !isDriveConnected}
+        {#if !isStorageConfigured}
           <div class="card" style="margin-top: 1.5rem; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white; border: 1px solid #334155; padding: 1.5rem; border-radius: var(--radius-lg);">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.25rem;">
               <div style="max-width: 620px;">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
-                  <span style="font-size: 1.5rem;">☁️</span>
-                  <h3 style="margin: 0; color: white;">Step 1: Connect Google Drive (Required)</h3>
+                  <span style="font-size: 1.5rem;">⚡</span>
+                  <h3 style="margin: 0; color: white;">Configure Supabase Cloud Storage</h3>
                 </div>
                 <p style="margin: 0; font-size: 0.9375rem; color: #cbd5e1; line-height: 1.5;">
-                  Connect your Google Drive with 1-Click Google Auth before creating an event. All photos captured by your 100+ guests will be stored directly in your personal Google Drive and streamed via Google's high-speed CDN.
+                  Connect your Supabase project to store photos directly in the cloud and deliver instant high-res memories to your live gallery and TV screens.
                 </p>
               </div>
               <button
                 class="btn-primary"
                 style="background: #2563eb; border-color: #2563eb; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700; white-space: nowrap;"
-                onclick={() => handleConnectGoogleDrive()}
-                disabled={isConnectingDrive}
+                onclick={() => (isStorageModalOpen = true)}
               >
-                <span>🔗</span> {isConnectingDrive ? "Connecting..." : "1-Click Connect Drive"}
+                <span>⚙️</span> Configure Storage
               </button>
             </div>
           </div>
@@ -2872,9 +2829,7 @@
             <div class="empty-icon">📁</div>
             <h3>No events created yet</h3>
             <p class="text-secondary">
-              {isDriveConnected
-                ? "Click '+ Create New Event' above to set up your event space and generate QR codes."
-                : "Connect your Google Drive above, then create your first event space to start receiving guest memories."}
+              Click '+ Create New Event' above to set up your event space and generate QR codes.
             </p>
           </div>
         {:else}
@@ -4212,90 +4167,112 @@
     </div>
   {/if}
 
-  <!-- GOOGLE DRIVE 1-CLICK AUTH MODAL (Prerequisite for Event Hosting) -->
-  {#if isDriveModalOpen}
+  <!-- SUPABASE CLOUD STORAGE SETTINGS MODAL -->
+  {#if isStorageModalOpen}
     <div
       class="modal-backdrop"
       role="dialog"
       aria-modal="true"
       tabindex="-1"
-      onclick={() => (isDriveModalOpen = false)}
+      onclick={() => (isStorageModalOpen = false)}
       onkeydown={(e) => {
-        if (e.key === "Escape") isDriveModalOpen = false;
+        if (e.key === "Escape") isStorageModalOpen = false;
       }}
     >
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="modal-card" style="max-width: 520px;" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-card" style="max-width: 540px;" onclick={(e) => e.stopPropagation()}>
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span style="font-size: 1.5rem;">☁️</span>
+            <span style="font-size: 1.5rem;">⚡</span>
             <div>
-              <h3 style="margin: 0;">Connect Google Drive</h3>
-              <span class="text-secondary" style="font-size: 0.8125rem;">1-Click Google Auth for Hosting 100+ Guest Photos</span>
+              <h3 style="margin: 0;">Supabase Cloud Storage</h3>
+              <span class="text-secondary" style="font-size: 0.8125rem;">Direct-to-Cloud Uploads & High-Speed CDN Delivery</span>
             </div>
           </div>
-          <button class="close-btn" onclick={() => (isDriveModalOpen = false)}>&times;</button>
+          <button class="close-btn" onclick={() => (isStorageModalOpen = false)}>&times;</button>
         </div>
 
         <div class="form-stack">
           <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1.25rem;">
-            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
-              <span style="font-size: 2rem;">🚀</span>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+              <span style="font-size: 1.75rem;">🚀</span>
               <div>
-                <strong style="font-size: 0.9375rem;">Cloud-First Event Hosting</strong>
+                <strong style="font-size: 0.9375rem;">Ultra-Fast Direct Photo Storage</strong>
                 <p class="text-secondary" style="margin: 0.25rem 0 0 0; font-size: 0.8125rem; line-height: 1.4;">
-                  Authorize EventCaps with your Google account to automatically store guest photo uploads in Google Drive and stream them via Google's high-speed CDN.
+                  Guests upload photos directly to your Supabase bucket. Photos stream instantly to your moderation queue and live TV wall via Supabase CDN.
                 </p>
               </div>
             </div>
-
-            <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem; font-size: 0.8125rem; color: var(--color-text-secondary); line-height: 1.5;">
-              <li>Creates album folder: <code>/EventCaps Events/&lt;Event Name&gt;/</code></li>
-              <li>Guests upload photos directly to your Drive via resumable sessions</li>
-              <li>TV Slideshows & Live Wall stream from Google Cloud CDN</li>
-            </ul>
           </div>
 
           <div>
-            <label class="form-label" for="oauthClientIdInput">Google OAuth 2.0 Client ID *</label>
+            <label class="form-label" for="supabaseUrl">Supabase Project URL *</label>
             <input
-              id="oauthClientIdInput"
+              id="supabaseUrl"
               type="text"
               class="input-field"
-              placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com"
-              bind:value={gdriveClientIdInput}
+              placeholder="https://your-project.supabase.co"
+              bind:value={supabaseUrlInput}
             />
-            <span class="helper-text">From your Google Cloud Console. Saved permanently on this browser.</span>
           </div>
 
-          <div class="modal-footer" style="margin-top: 1rem;">
-            {#if isDriveConnected}
-              <button
-                type="button"
-                class="btn-secondary"
-                style="color: var(--color-danger);"
-                onclick={handleDisconnectGoogleDrive}
-              >
-                Disconnect
-              </button>
-            {/if}
+          <div>
+            <label class="form-label" for="supabaseAnonKey">Supabase Project API Key (anon / public) *</label>
+            <textarea
+              id="supabaseAnonKey"
+              class="input-field"
+              rows="3"
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+              bind:value={supabaseAnonKeyInput}
+            ></textarea>
+            <span class="helper-text">Public Anon Key from your Supabase Project Settings → API.</span>
+          </div>
+
+          <div>
+            <label class="form-label" for="supabaseBucket">Storage Bucket Name</label>
+            <input
+              id="supabaseBucket"
+              type="text"
+              class="input-field"
+              placeholder="eventcaps-photos"
+              bind:value={supabaseBucketInput}
+            />
+            <span class="helper-text">Make sure this bucket exists and is set to <strong>Public</strong> in Supabase Storage.</span>
+          </div>
+
+          {#if storageTestResult}
+            <div class={storageTestResult.success ? "alert-success" : "alert-error"} style="margin-top: 0.5rem; font-size: 0.875rem;">
+              {storageTestResult.message}
+            </div>
+          {/if}
+
+          <div class="modal-footer" style="margin-top: 1rem; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
             <button
               type="button"
               class="btn-secondary"
-              onclick={() => (isDriveModalOpen = false)}
+              disabled={isTestingStorage || !supabaseUrlInput.trim() || !supabaseAnonKeyInput.trim()}
+              onclick={handleTestStorageConnection}
             >
-              Cancel
+              {isTestingStorage ? "Testing..." : "🧪 Test Connection"}
             </button>
-            <button
-              type="button"
-              class="btn-primary"
-              disabled={isConnectingDrive || !gdriveClientIdInput.trim()}
-              onclick={handleConnectGoogleDrive}
-            >
-              <span>🔗</span>
-              {isConnectingDrive ? 'Connecting with Google...' : '1-Click Connect Google Drive'}
-            </button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button
+                type="button"
+                class="btn-secondary"
+                onclick={() => (isStorageModalOpen = false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                disabled={!supabaseUrlInput.trim() || !supabaseAnonKeyInput.trim()}
+                onclick={handleSaveStorageConfig}
+              >
+                <span>💾</span> Save Settings
+              </button>
+            </div>
           </div>
         </div>
       </div>

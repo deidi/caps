@@ -1,16 +1,9 @@
 import mqtt from 'mqtt';
 import { db, blobToBase64, base64ToBlob, getCachedObjectURL } from './db.js';
-import {
-  getStoredDriveToken,
-  setupEventDriveHierarchy,
-  createResumableUploadSession,
-  getDriveCDNUrl,
-  getDriveThumbnailUrl
-} from './gdrive.js';
 
 /**
- * Ultra-Lightweight Real-time PubSub Event Bus
- * Optimized for 100+ concurrent guests: strictly separates lightweight signaling from heavy binary media.
+ * Ultra-Lightweight Real-time PubSub Event Bus (Supabase Cloud Storage Integrated)
+ * Optimized for 100+ concurrent guests: strictly delivers lightweight (<1KB) metadata.
  */
 export function initRealtimeHub(slug, options = {}) {
   if (!slug) return null;
@@ -22,7 +15,6 @@ export function initRealtimeHub(slug, options = {}) {
 
   let isDestroyed = false;
   const activePeers = new Set();
-  const pendingSessionRequests = new Map();
 
   const myClientId = 'client_' + Math.random().toString(36).substring(2, 10);
   const topicBase = `eventcaps_${slug}`;
@@ -30,9 +22,6 @@ export function initRealtimeHub(slug, options = {}) {
   const topicGalleryRetained = `${topicBase}/gallery_retained`;
   const topicGalleryReq = `${topicBase}/gallery_req`;
   const topicPhotos = `${topicBase}/photos`;
-  const topicGDriveReq = `${topicBase}/gdrive_req`;
-  const topicGDriveReadyPattern = `${topicBase}/gdrive_ready/+`;
-  const topicGDriveDone = `${topicBase}/gdrive_done`;
   const topicJoins = `${topicBase}/joins`;
   const topicPresence = `${topicBase}/presence/+`;
   const myPresenceTopic = `${topicBase}/presence/${myClientId}`;
@@ -44,14 +33,8 @@ export function initRealtimeHub(slug, options = {}) {
       localChannel = new BroadcastChannel(`eventcaps_rt_${slug}`);
       localChannel.onmessage = async (event) => {
         if (event.data && !isDestroyed) {
-          if (event.data.type === 'local:gdrive-req' && isHost) {
-            await handleIncomingGDriveRequest(event.data.payload);
-          } else if (event.data.type === 'local:gdrive-ready' && !isHost) {
-            handleGDriveReadyResponse(event.data.payload);
-          } else if (event.data.type === 'local:gdrive-done' && isHost) {
-            await handleIncomingGDriveDone(event.data.payload);
-          } else if (event.data.type === 'local:photo-direct' && isHost) {
-            await handleIncomingDirectPhoto(event.data.payload);
+          if (event.data.type === 'local:photo-uploaded' && isHost) {
+            await handleIncomingCloudPhoto(event.data.payload);
           } else if (event.data.type === 'local:gallery-req' && isHost) {
             await broadcastApprovedGallery();
           } else {
@@ -75,7 +58,7 @@ export function initRealtimeHub(slug, options = {}) {
       clean: true,
       connectTimeout: 8000,
       reconnectPeriod: 2500,
-      keepalive: 45
+      keepalive: 45,
     });
 
     client.on('connect', () => {
@@ -83,31 +66,34 @@ export function initRealtimeHub(slug, options = {}) {
       onStatusChange('connected');
       onPeerCountChange(1);
 
-      client.subscribe([
-        topicBroadcast,
-        topicGalleryRetained,
-        topicGalleryReq,
-        topicPhotos,
-        topicGDriveReq,
-        topicGDriveReadyPattern,
-        topicGDriveDone,
-        topicJoins,
-        topicPresence
-      ], (err) => {
-        if (err) console.warn('MQTT subscribe warning:', err);
-        
-        // As soon as guest subscribes, explicitly request gallery sync from host
-        if (!isHost) {
-          requestGallerySync();
+      client.subscribe(
+        [
+          topicBroadcast,
+          topicGalleryRetained,
+          topicGalleryReq,
+          topicPhotos,
+          topicJoins,
+          topicPresence,
+        ],
+        (err) => {
+          if (err) console.warn('MQTT subscribe warning:', err);
+
+          // As soon as guest subscribes, request gallery sync from host
+          if (!isHost) {
+            requestGallerySync();
+          }
         }
-      });
+      );
 
       // Presence heartbeat
-      client.publish(myPresenceTopic, JSON.stringify({
-        senderId: myClientId,
-        role: isHost ? 'host' : 'guest',
-        timestamp: Date.now()
-      }));
+      client.publish(
+        myPresenceTopic,
+        JSON.stringify({
+          senderId: myClientId,
+          role: isHost ? 'host' : 'guest',
+          timestamp: Date.now(),
+        })
+      );
 
       if (isHost) {
         broadcastApprovedGallery();
@@ -128,19 +114,7 @@ export function initRealtimeHub(slug, options = {}) {
           await broadcastApprovedGallery();
         } else if (topic === topicPhotos && isHost) {
           if (payload.photo) {
-            await handleIncomingDirectPhoto(payload.photo);
-          }
-        } else if (topic === topicGDriveReq && isHost) {
-          if (payload.req) {
-            await handleIncomingGDriveRequest(payload.req);
-          }
-        } else if (topic.startsWith(`${topicBase}/gdrive_ready/`) && !isHost) {
-          if (payload.ready) {
-            handleGDriveReadyResponse(payload.ready);
-          }
-        } else if (topic === topicGDriveDone && isHost) {
-          if (payload.done) {
-            await handleIncomingGDriveDone(payload.done);
+            await handleIncomingCloudPhoto(payload.photo);
           }
         } else if (topic === topicJoins && isHost) {
           if (payload.guest) {
@@ -177,104 +151,30 @@ export function initRealtimeHub(slug, options = {}) {
 
   function requestGallerySync() {
     if (client && client.connected) {
-      client.publish(topicGalleryReq, JSON.stringify({
-        senderId: myClientId,
-        timestamp: Date.now()
-      }));
+      client.publish(
+        topicGalleryReq,
+        JSON.stringify({
+          senderId: myClientId,
+          timestamp: Date.now(),
+        })
+      );
     }
     if (localChannel) {
       localChannel.postMessage({
         type: 'local:gallery-req',
-        payload: { senderId: myClientId }
+        payload: { senderId: myClientId },
       });
     }
   }
 
-  // --- GOOGLE DRIVE SESSION COORDINATION (1-Click Google OAuth GIS) ---
-  async function handleIncomingGDriveRequest(req) {
-    if (!isHost || isDestroyed) return;
-    try {
-      const token = getStoredDriveToken();
-
-      if (!token) {
-        publishGDriveReady(req.requestId, { requestId: req.requestId, disabled: true });
-        return;
-      }
-
-      const event = await db.events.where('slug').equals(slug).first();
-      const eventName = event ? event.name : slug;
-
-      if (req.hash) {
-        const existing = await db.photos.where('hash').equals(req.hash).first();
-        if (existing) {
-          publishGDriveReady(req.requestId, { requestId: req.requestId, duplicate: true });
-          return;
-        }
-      }
-
-      const { originalsFolderId, thumbnailsFolderId } = await setupEventDriveHierarchy(slug, eventName);
-
-      const [origUploadUri, thumbUploadUri] = await Promise.all([
-        createResumableUploadSession({
-          folderId: originalsFolderId,
-          fileName: req.filename || `photo_${Date.now()}.jpg`,
-          mimeType: req.mimeType || 'image/jpeg',
-          fileSize: req.origSize
-        }),
-        createResumableUploadSession({
-          folderId: thumbnailsFolderId,
-          fileName: `thumb_${req.filename || Date.now()}.jpg`,
-          mimeType: 'image/jpeg',
-          fileSize: req.thumbSize
-        })
-      ]);
-
-      const readyPayload = {
-        requestId: req.requestId,
-        origUploadUri,
-        thumbUploadUri
-      };
-
-      publishGDriveReady(req.requestId, readyPayload);
-    } catch (err) {
-      console.error('Failed to create Drive resumable session for guest:', err);
-      publishGDriveReady(req.requestId, { requestId: req.requestId, error: err.message });
-    }
-  }
-
-  function publishGDriveReady(requestId, readyPayload) {
-    const topic = `${topicBase}/gdrive_ready/${requestId}`;
-    if (client && client.connected) {
-      client.publish(topic, JSON.stringify({
-        senderId: myClientId,
-        ready: readyPayload
-      }));
-    }
-    if (localChannel) {
-      localChannel.postMessage({
-        type: 'local:gdrive-ready',
-        payload: readyPayload
-      });
-    }
-  }
-
-  function handleGDriveReadyResponse(readyPayload) {
-    if (!readyPayload || !readyPayload.requestId) return;
-    const resolver = pendingSessionRequests.get(readyPayload.requestId);
-    if (resolver) {
-      pendingSessionRequests.delete(readyPayload.requestId);
-      resolver(readyPayload);
-    }
-  }
-
-  async function handleIncomingGDriveDone(donePayload) {
+  async function handleIncomingCloudPhoto(photoData) {
     if (!isHost || isDestroyed) return;
     try {
       const {
-        driveOrigId,
-        driveThumbId,
-        driveOrigUrl,
-        driveThumbUrl,
+        origUrl,
+        thumbUrl,
+        origPath,
+        thumbPath,
         filename,
         hash,
         width,
@@ -283,100 +183,17 @@ export function initRealtimeHub(slug, options = {}) {
         mimeType,
         guest_name,
         guest_token,
-        thumbDataUrl
-      } = donePayload;
-
-      let event = await db.events.where('slug').equals(slug).first();
-      const initialStatus = (!event || !event.moderation_enabled) ? 'approved' : 'pending';
-      const now = new Date().toISOString();
-
-      let guest = null;
-      if (guest_token) {
-        guest = await db.guests.where('token').equals(guest_token).first();
-        if (!guest) {
-          const guestId = await db.guests.add({
-            event_slug: slug,
-            name: guest_name || 'Guest',
-            token: guest_token,
-            upload_count: 1,
-            created_at: now
-          });
-          guest = { id: guestId, name: guest_name, token: guest_token, upload_count: 1 };
-        } else {
-          await db.guests.update(guest.id, { upload_count: (guest.upload_count || 0) + 1 });
-        }
-      }
-
-      const finalOrigUrl = driveOrigUrl || (driveOrigId ? getDriveCDNUrl(driveOrigId, 2048) : '');
-      const finalThumbUrl = driveThumbUrl || (driveThumbId ? getDriveThumbnailUrl(driveThumbId, 400) : finalOrigUrl);
-
-      const photoRecord = {
-        event_slug: slug,
-        guest_id: guest ? guest.id : null,
-        guest_name: guest_name || (guest ? guest.name : 'Guest'),
-        filename: filename || `photo_${Date.now()}.jpg`,
-        hash,
-        status: initialStatus,
-        width: width || 2048,
-        height: height || 1536,
-        size: size || 0,
-        mime_type: mimeType || 'image/jpeg',
-        drive_orig_id: driveOrigId,
-        drive_thumb_id: driveThumbId,
-        drive_orig_url: finalOrigUrl,
-        drive_thumb_url: finalThumbUrl,
-        created_at: now
-      };
-
-      const id = await db.photos.add(photoRecord);
-
-      const formattedPhoto = {
-        id,
-        ...photoRecord,
         thumbDataUrl,
-        original_url: finalOrigUrl,
-        thumb_url: finalThumbUrl,
-        original_path: finalOrigUrl,
-        thumbnail_path: finalThumbUrl
-      };
-
-      onMessage({
-        type: 'photo:uploaded',
-        payload: formattedPhoto
-      });
-
-      if (initialStatus === 'approved') {
-        broadcastApprovedGallery();
-      }
-    } catch (err) {
-      console.error('Failed to handle gdrive:done payload:', err);
-    }
-  }
-
-  // --- FALLBACK DIRECT PHOTO STREAMING (Strictly Micro-Thumbnails, NEVER multi-MB originals) ---
-  async function handleIncomingDirectPhoto(photoData) {
-    if (!isHost || isDestroyed) return;
-    try {
-      const {
-        filename,
-        guest_name,
-        guest_token,
-        hash,
-        width,
-        height,
-        size,
-        mimeType,
-        thumbDataUrl,
-        drive_orig_url,
-        drive_thumb_url
       } = photoData;
 
       let event = await db.events.where('slug').equals(slug).first();
-      const existing = await db.photos.where('hash').equals(hash).first();
-      if (existing) return;
-
-      const initialStatus = (!event || !event.moderation_enabled) ? 'approved' : 'pending';
+      const initialStatus = !event || !event.moderation_enabled ? 'approved' : 'pending';
       const now = new Date().toISOString();
+
+      if (hash) {
+        const existing = await db.photos.where('hash').equals(hash).first();
+        if (existing) return;
+      }
 
       let guest = null;
       if (guest_token) {
@@ -387,7 +204,7 @@ export function initRealtimeHub(slug, options = {}) {
             name: guest_name || 'Guest',
             token: guest_token,
             upload_count: 1,
-            created_at: now
+            created_at: now,
           });
           guest = { id: guestId, name: guest_name, token: guest_token, upload_count: 1 };
         } else {
@@ -395,9 +212,8 @@ export function initRealtimeHub(slug, options = {}) {
         }
       }
 
-      const thumbBlob = thumbDataUrl ? base64ToBlob(thumbDataUrl) : null;
-      const finalOrigUrl = drive_orig_url || (thumbBlob ? getCachedObjectURL(thumbBlob, `thumb_${Date.now()}`) : '');
-      const finalThumbUrl = drive_thumb_url || (thumbBlob ? getCachedObjectURL(thumbBlob, `thumb_${Date.now()}`) : finalOrigUrl);
+      const finalOrigUrl = origUrl || '';
+      const finalThumbUrl = thumbUrl || finalOrigUrl;
 
       const photoRecord = {
         event_slug: slug,
@@ -410,10 +226,15 @@ export function initRealtimeHub(slug, options = {}) {
         height: height || 1536,
         size: size || 0,
         mime_type: mimeType || 'image/jpeg',
-        thumb_blob: thumbBlob,
-        drive_orig_url: drive_orig_url || '',
-        drive_thumb_url: drive_thumb_url || '',
-        created_at: now
+        storage_orig_path: origPath || '',
+        storage_thumb_path: thumbPath || '',
+        storage_orig_url: finalOrigUrl,
+        storage_thumb_url: finalThumbUrl,
+        original_url: finalOrigUrl,
+        thumb_url: finalThumbUrl,
+        original_path: finalOrigUrl,
+        thumbnail_path: finalThumbUrl,
+        created_at: now,
       };
 
       const id = await db.photos.add(photoRecord);
@@ -422,43 +243,18 @@ export function initRealtimeHub(slug, options = {}) {
         id,
         ...photoRecord,
         thumbDataUrl,
-        original_url: finalOrigUrl,
-        thumb_url: finalThumbUrl,
-        original_path: finalOrigUrl,
-        thumbnail_path: finalThumbUrl
       };
 
       onMessage({
         type: 'photo:uploaded',
-        payload: formattedPhoto
+        payload: formattedPhoto,
       });
-
-      // Background auto-upload to Google Drive if Host has Google Drive connected
-      if (getStoredDriveToken() && thumbBlob) {
-        setupEventDriveHierarchy(slug, event?.name || slug).then(async ({ thumbnailsFolderId }) => {
-          try {
-            const up = await uploadBlobToDrive(thumbnailsFolderId, `thumb_${filename || Date.now()}.jpg`, thumbBlob, 'image/jpeg');
-            if (up?.id) {
-              const driveThumbUrl = getDriveThumbnailUrl(up.id, 400);
-              await db.photos.update(id, {
-                drive_thumb_id: up.id,
-                drive_thumb_url: driveThumbUrl
-              });
-              if (initialStatus === 'approved') {
-                broadcastApprovedGallery();
-              }
-            }
-          } catch (e) {
-            console.warn('Background Drive upload for incoming photo failed:', e);
-          }
-        }).catch(err => console.warn('Could not setup Drive hierarchy:', err));
-      }
 
       if (initialStatus === 'approved') {
         broadcastApprovedGallery();
       }
     } catch (err) {
-      console.error('Failed to handle direct photo payload:', err);
+      console.error('Failed to handle incoming cloud photo:', err);
     }
   }
 
@@ -471,12 +267,12 @@ export function initRealtimeHub(slug, options = {}) {
           name: guestData.name,
           token: guestData.token,
           upload_count: 0,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
         });
       }
       onMessage({
         type: 'guest:joined',
-        payload: guestData
+        payload: guestData,
       });
       if (isHost) {
         broadcastApprovedGallery();
@@ -491,21 +287,12 @@ export function initRealtimeHub(slug, options = {}) {
     try {
       const event = await db.events.where('slug').equals(slug).first();
       const allPhotos = await db.photos.where('event_slug').equals(slug).toArray();
-      const approved = allPhotos.filter(p => p.status === 'approved');
+      const approved = allPhotos.filter((p) => p.status === 'approved');
 
       const payloadPhotos = [];
       for (const p of approved) {
-        let thumbUrl = p.drive_thumb_url || p.drive_orig_url || '';
-        let origUrl = p.drive_orig_url || p.drive_thumb_url || '';
-        let thumbDataUrl = '';
-
-        if (!thumbUrl && p.thumb_blob) {
-          try {
-            thumbDataUrl = await blobToBase64(p.thumb_blob);
-            thumbUrl = thumbDataUrl;
-            origUrl = thumbDataUrl;
-          } catch (e) {}
-        }
+        const thumbUrl = p.storage_thumb_url || p.thumb_url || p.storage_orig_url || p.original_url || '';
+        const origUrl = p.storage_orig_url || p.original_url || thumbUrl;
 
         payloadPhotos.push({
           id: p.id,
@@ -515,15 +302,12 @@ export function initRealtimeHub(slug, options = {}) {
           status: 'approved',
           created_at: p.created_at,
           filename: p.filename,
-          drive_orig_id: p.drive_orig_id,
-          drive_thumb_id: p.drive_thumb_id,
-          drive_orig_url: p.drive_orig_url,
-          drive_thumb_url: p.drive_thumb_url,
+          storage_orig_url: p.storage_orig_url,
+          storage_thumb_url: p.storage_thumb_url,
           thumb_url: thumbUrl,
           original_url: origUrl,
           thumbnail_path: thumbUrl,
           original_path: origUrl,
-          thumbDataUrl: (!thumbUrl.startsWith('http') ? thumbDataUrl : '') // Only send base64 if no CDN URL
         });
       }
 
@@ -531,29 +315,38 @@ export function initRealtimeHub(slug, options = {}) {
         type: 'gallery:synced',
         payload: {
           photos: payloadPhotos,
-          event_settings: event ? {
-            slug: event.slug,
-            name: event.name,
-            date: event.date,
-            tagline: event.tagline,
-            guest_upload_limit: Number(event.guest_upload_limit) || 20,
-            moderation_enabled: Boolean(event.moderation_enabled),
-            status: event.status
-          } : null
-        }
+          event_settings: event
+            ? {
+                slug: event.slug,
+                name: event.name,
+                date: event.date,
+                tagline: event.tagline,
+                guest_upload_limit: Number(event.guest_upload_limit) || 20,
+                moderation_enabled: Boolean(event.moderation_enabled),
+                status: event.status,
+              }
+            : null,
+        },
       };
 
       // 1. Broadcast live to active peers
-      client.publish(`${topicBase}/broadcast`, JSON.stringify({
-        senderId: myClientId,
-        msg: syncMsg
-      }));
+      client.publish(
+        `${topicBase}/broadcast`,
+        JSON.stringify({
+          senderId: myClientId,
+          msg: syncMsg,
+        })
+      );
 
       // 2. Publish as retained message so ANY newly connecting peer gets it immediately
-      client.publish(topicGalleryRetained, JSON.stringify({
-        senderId: myClientId,
-        msg: syncMsg
-      }), { retain: true, qos: 1 });
+      client.publish(
+        topicGalleryRetained,
+        JSON.stringify({
+          senderId: myClientId,
+          msg: syncMsg,
+        }),
+        { retain: true, qos: 1 }
+      );
 
       if (localChannel) {
         localChannel.postMessage(syncMsg);
@@ -567,10 +360,13 @@ export function initRealtimeHub(slug, options = {}) {
     send: (msg) => {
       if (isDestroyed || !msg) return;
       if (client && client.connected) {
-        client.publish(topicBroadcast, JSON.stringify({
-          senderId: myClientId,
-          msg
-        }));
+        client.publish(
+          topicBroadcast,
+          JSON.stringify({
+            senderId: myClientId,
+            msg,
+          })
+        );
       }
       if (localChannel) {
         localChannel.postMessage(msg);
@@ -586,81 +382,33 @@ export function initRealtimeHub(slug, options = {}) {
     notifyGuestJoin: (guestData) => {
       if (isDestroyed || !guestData) return;
       if (client && client.connected) {
-        client.publish(topicJoins, JSON.stringify({
-          senderId: myClientId,
-          guest: guestData
-        }));
+        client.publish(
+          topicJoins,
+          JSON.stringify({
+            senderId: myClientId,
+            guest: guestData,
+          })
+        );
       }
       if (localChannel) {
         localChannel.postMessage({ type: 'guest:joined', payload: guestData });
       }
     },
 
-    requestGDriveUploadSession: async (photoMeta, guestInfo) => {
-      const requestId = 'req_' + Math.random().toString(36).substring(2, 12);
-      const sessionPromise = new Promise((resolve) => {
-        pendingSessionRequests.set(requestId, resolve);
-        setTimeout(() => {
-          if (pendingSessionRequests.has(requestId)) {
-            pendingSessionRequests.delete(requestId);
-            resolve(null);
-          }
-        }, 4000);
-      });
-
-      const gdriveReqPayload = {
-        requestId,
-        filename: photoMeta.filename,
-        mimeType: photoMeta.mimeType || 'image/jpeg',
-        origSize: photoMeta.origSize,
-        thumbSize: photoMeta.thumbSize,
-        hash: photoMeta.hash,
-        guestInfo
-      };
-
+    notifyPhotoUploaded: (photoPayload) => {
       if (client && client.connected) {
-        client.publish(topicGDriveReq, JSON.stringify({
-          senderId: myClientId,
-          req: gdriveReqPayload
-        }));
-      }
-
-      if (localChannel) {
-        localChannel.postMessage({
-          type: 'local:gdrive-req',
-          payload: gdriveReqPayload
-        });
-      }
-
-      return sessionPromise;
-    },
-
-    notifyGDrivePhotoUploaded: (donePayload) => {
-      if (client && client.connected) {
-        client.publish(topicGDriveDone, JSON.stringify({
-          senderId: myClientId,
-          done: donePayload
-        }));
+        client.publish(
+          topicPhotos,
+          JSON.stringify({
+            senderId: myClientId,
+            photo: photoPayload,
+          })
+        );
       }
       if (localChannel) {
         localChannel.postMessage({
-          type: 'local:gdrive-done',
-          payload: donePayload
-        });
-      }
-    },
-
-    sendPhotoDirect: (photoPayload) => {
-      if (client && client.connected) {
-        client.publish(topicPhotos, JSON.stringify({
-          senderId: myClientId,
-          photo: photoPayload
-        }));
-      }
-      if (localChannel) {
-        localChannel.postMessage({
-          type: 'local:photo-direct',
-          payload: photoPayload
+          type: 'local:photo-uploaded',
+          payload: photoPayload,
         });
       }
     },
@@ -676,6 +424,6 @@ export function initRealtimeHub(slug, options = {}) {
         } catch (e) {}
       }
       onStatusChange('disconnected');
-    }
+    },
   };
 }
